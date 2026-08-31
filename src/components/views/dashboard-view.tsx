@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsUpDown,
   ClipboardList,
   Crosshair,
   Download,
@@ -10,10 +13,13 @@ import {
   RefreshCw,
   ScanEye,
   ScanLine,
+  Search,
+  SearchX,
   ShieldCheck,
   Timer,
   TriangleAlert,
   Undo2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -43,6 +49,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
 import { ICDR_CLASSES, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
 import { downloadReportPdf } from "@/lib/report-pdf";
 import { cn } from "@/lib/utils";
@@ -77,6 +84,37 @@ interface PatientDetail {
 }
 
 type FilterKey = "all" | "auto_cleared" | "needs_review" | "urgent" | "rejected";
+
+type SortKey = "patient_id" | "created_at" | "grade" | "confidence" | "trust_score" | "status" | "processing_ms";
+
+// doctor-meaningful lane order: urgent first, auto-cleared last
+const STATUS_SORT_ORDER: Record<CaseStatus, number> = {
+  URGENT: 0,
+  NEEDS_REVIEW: 1,
+  REJECTED: 2,
+  AUTO_CLEARED: 3,
+};
+
+const NUMERIC_SORT_KEYS = new Set<SortKey>(["created_at", "grade", "confidence", "trust_score", "processing_ms"]);
+
+function sortValue(r: PatientRow, key: SortKey): string | number {
+  switch (key) {
+    case "patient_id":
+      return r.patient_id;
+    case "created_at":
+      return new Date(r.created_at).getTime();
+    case "grade":
+      return r.class_level;
+    case "confidence":
+      return r.confidence;
+    case "trust_score":
+      return r.trust_score;
+    case "status":
+      return STATUS_SORT_ORDER[r.status] ?? 9;
+    case "processing_ms":
+      return r.processing_ms;
+  }
+}
 
 // ────────────────────────────────────────────────────────────
 // Constants
@@ -174,7 +212,59 @@ function StatCard({
   );
 }
 
-function EmptyQueue({ onLaunch }: { onLaunch: () => void }) {
+function SortHead({
+  label,
+  colKey,
+  sortKey,
+  sortDir,
+  onSort,
+  className,
+}: {
+  label: string;
+  colKey: SortKey;
+  sortKey: SortKey | null;
+  sortDir: 1 | -1;
+  onSort: (k: SortKey) => void;
+  className?: string;
+}) {
+  const active = sortKey === colKey;
+  const Icon = !active ? ChevronsUpDown : sortDir === 1 ? ArrowUp : ArrowDown;
+  return (
+    <TableHead
+      className={className}
+      aria-sort={active ? (sortDir === 1 ? "ascending" : "descending") : "none"}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        title={`Sort by ${label.toLowerCase()}`}
+        className={cn(
+          "inline-flex items-center gap-1 rounded uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          active ? "text-[#22D3EE]" : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        {label}
+        <Icon
+          className={cn("h-3 w-3 shrink-0", active ? "opacity-100" : "opacity-45")}
+          aria-hidden="true"
+        />
+      </button>
+    </TableHead>
+  );
+}
+
+function EmptyQueue({ onLaunch, searching, query }: { onLaunch: () => void; searching?: boolean; query?: string }) {
+  if (searching) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
+        <SearchX className="h-7 w-7 text-[#FBBF24]/70" aria-hidden="true" />
+        <p className="text-sm text-muted-foreground">
+          No cases match <span className="font-semibold text-foreground">“{query}”</span> in this queue
+        </p>
+        <p className="text-xs text-muted-foreground/80">Patient IDs look like SEVERE-001 or RAMPUR-0118</p>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
       <ScanLine className="h-8 w-8 text-[#22D3EE]/60" aria-hidden="true" />
@@ -272,6 +362,11 @@ export default function DashboardView() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailNonce, setDetailNonce] = useState(0);
+
+  // register search + column sort (client-side, applies to the active lane)
+  const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
   // sign-off audit trail: patientId → who/when (persisted server-side via PATCH)
   const signedOffRef = useRef<Record<string, boolean>>({});
@@ -380,8 +475,10 @@ export default function DashboardView() {
     const referable = list.filter((r) => r.class_level >= 2 && r.status !== "REJECTED").length;
     const urgentCount = list.filter((r) => r.status === "URGENT").length;
     const queue = list.filter((r) => r.status === "NEEDS_REVIEW" || r.status === "URGENT").length;
+    const signedCount = list.filter((r) => r.reviewed_by).length;
+    const signedToday = list.filter((r) => r.reviewed_at && new Date(r.reviewed_at).toDateString() === today).length;
     const avgMs = list.length ? list.reduce((a, r) => a + r.processing_ms, 0) / list.length : 0;
-    return { screenedToday, referable, urgentCount, queue, avgSec: avgMs / 1000 };
+    return { screenedToday, referable, urgentCount, queue, signedCount, signedToday, avgSec: avgMs / 1000 };
   }, [allRows]);
 
   const counts = useMemo(() => {
@@ -395,6 +492,45 @@ export default function DashboardView() {
     }
     return c;
   }, [allRows]);
+
+  // how many auto-cleared cases carry a doctor sign-off (chip badge)
+  const signedAuto = useMemo(
+    () => (allRows ?? []).filter((r) => r.status === "AUTO_CLEARED" && r.reviewed_by).length,
+    [allRows]
+  );
+
+  // search + sort pipeline over the active lane's rows
+  const visibleRows = useMemo(() => {
+    let list = rows ?? [];
+    const q = query.trim().toUpperCase();
+    if (q) list = list.filter((r) => r.patient_id.toUpperCase().includes(q));
+    if (sortKey) {
+      const dir = sortDir;
+      list = [...list].sort((a, b) => {
+        const va = sortValue(a, sortKey);
+        const vb = sortValue(b, sortKey);
+        if (typeof va === "string" || typeof vb === "string") {
+          return dir === 1
+            ? String(va).localeCompare(String(vb))
+            : String(vb).localeCompare(String(va));
+        }
+        return dir === 1 ? va - vb : vb - va;
+      });
+    }
+    return list;
+  }, [rows, query, sortKey, sortDir]);
+
+  const handleSort = useCallback(
+    (key: SortKey) => {
+      if (sortKey === key) {
+        setSortDir((d) => (d === 1 ? -1 : 1));
+      } else {
+        setSortKey(key);
+        setSortDir(NUMERIC_SORT_KEYS.has(key) ? -1 : 1);
+      }
+    },
+    [sortKey]
+  );
 
   const openReport = useCallback((patientId: string) => {
     setOpenId(patientId);
@@ -558,7 +694,7 @@ export default function DashboardView() {
             </div>
           </GlassCard>
         ) : (
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
             <StatCard
               icon={ScanEye}
               label="Screened today"
@@ -591,23 +727,36 @@ export default function DashboardView() {
               loading={allLoading}
             />
             <StatCard
+              icon={ShieldCheck}
+              label="Signed off"
+              sub={
+                stats.signedToday > 0
+                  ? `${stats.signedToday} approved today · closed in the register`
+                  : "cases approved by the reviewing doctor"
+              }
+              value={stats.signedCount}
+              valueClass="text-[#34D399]"
+              iconClass="border-[#34D399]/30 bg-[#34D399]/10 text-[#34D399]"
+              loading={allLoading}
+            />
+            <StatCard
               icon={Timer}
               label="Avg processing time"
               sub="gate → evidence → CNN → Grad-CAM → trust"
               value={stats.avgSec}
               decimals={1}
               suffix="s"
-              valueClass="text-[#34D399]"
-              iconClass="border-[#34D399]/30 bg-[#34D399]/10 text-[#34D399]"
+              valueClass="text-[#22D3EE]"
+              iconClass="border-[#22D3EE]/30 bg-[#22D3EE]/10 text-[#22D3EE]"
               loading={allLoading}
             />
           </div>
         )}
       </Reveal>
 
-      {/* 2 ── Filter tabs + register export */}
+      {/* 2 ── Filter tabs + search + register export */}
       <Reveal delay={0.1} className="mt-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
           {FILTER_TABS.map((t) => {
             const active = filter === t.key;
@@ -634,20 +783,60 @@ export default function DashboardView() {
                 >
                   {allRows ? counts[t.key] : "·"}
                 </span>
+                {t.key === "auto_cleared" && allRows && signedAuto > 0 && (
+                  <span
+                    className="inline-flex items-center gap-0.5 rounded-full border border-[#34D399]/40 bg-[#0A2E24]/70 px-1.5 py-0.5 text-[10px] font-semibold text-[#34D399]"
+                    title={`${signedAuto} of these were signed off by the doctor`}
+                  >
+                    <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+                    {signedAuto}
+                  </span>
+                )}
               </button>
             );
           })}
           </div>
-          <a
-            href={`/api/patients/export?filter=${filter}`}
-            download
-            className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
-            title="Download the current queue as a CSV register"
-          >
-            <FileDown className="h-4 w-4" aria-hidden="true" />
-            Export CSV
-          </a>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative w-full sm:w-60">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search patient ID…"
+                aria-label="Search cases by patient ID"
+                className="h-11 rounded-lg border-white/15 bg-white/[0.03] pl-9 pr-9 text-sm placeholder:text-muted-foreground/70 focus-visible:border-[#22D3EE]/50 focus-visible:ring-[#22D3EE]/25"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+            <a
+              href={`/api/patients/export?filter=${filter}`}
+              download
+              className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+              title="Download the current queue as a CSV register"
+            >
+              <FileDown className="h-4 w-4" aria-hidden="true" />
+              Export CSV
+            </a>
+          </div>
         </div>
+        {query.trim() !== "" && rows && !rowsLoading && !rowsError && (
+          <p className="mt-3 text-xs text-muted-foreground" role="status">
+            Showing <span className="tabular font-semibold text-[#22D3EE]">{visibleRows.length}</span> of{" "}
+            <span className="tabular">{rows.length}</span> cases in this lane matching “{query.trim()}”
+          </p>
+        )}
       </Reveal>
 
       {/* 3 ── Patient table (desktop) */}
@@ -661,25 +850,25 @@ export default function DashboardView() {
                 <div key={i} className="skeleton-shimmer h-10 w-full rounded-lg" />
               ))}
             </div>
-          ) : rows.length === 0 ? (
-            <EmptyQueue onLaunch={() => navigate("screening")} />
+          ) : visibleRows.length === 0 ? (
+            <EmptyQueue onLaunch={() => navigate("screening")} searching={query.trim() !== ""} query={query.trim()} />
           ) : (
             <div className="drishti-scroll max-h-[480px] overflow-y-auto">
               <Table>
                 <TableHeader className="sticky top-0 z-10 bg-[#0A1628]/95 backdrop-blur">
                   <TableRow className="border-white/10 hover:bg-transparent">
-                    <TableHead className="text-xs uppercase tracking-wider">Patient ID</TableHead>
-                    <TableHead className="text-xs uppercase tracking-wider">Date</TableHead>
-                    <TableHead className="text-xs uppercase tracking-wider">Grade</TableHead>
-                    <TableHead className="text-xs uppercase tracking-wider">Confidence</TableHead>
-                    <TableHead className="text-xs uppercase tracking-wider">Trust</TableHead>
-                    <TableHead className="text-xs uppercase tracking-wider">Status</TableHead>
+                    <SortHead label="Patient ID" colKey="patient_id" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
+                    <SortHead label="Date" colKey="created_at" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
+                    <SortHead label="Grade" colKey="grade" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
+                    <SortHead label="Confidence" colKey="confidence" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
+                    <SortHead label="Trust" colKey="trust_score" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
+                    <SortHead label="Status" colKey="status" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
                     <TableHead className="text-xs uppercase tracking-wider">DME</TableHead>
-                    <TableHead className="text-right text-xs uppercase tracking-wider">Time</TableHead>
+                    <SortHead label="Time" colKey="processing_ms" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-right text-xs" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((r) => {
+                  {visibleRows.map((r) => {
                     const gColor = rowGradeColor(r);
                     return (
                       <TableRow
@@ -693,6 +882,11 @@ export default function DashboardView() {
                             openReport(r.patient_id);
                           }
                         }}
+                        style={
+                          r.reviewed_by
+                            ? { boxShadow: "inset 2px 0 0 0 rgba(52,211,153,0.55)" }
+                            : undefined
+                        }
                         className="cursor-pointer border-white/5 hover:bg-white/[0.03] focus-visible:bg-white/[0.05] focus-visible:outline-none"
                       >
                         <TableCell className="py-3">
@@ -760,12 +954,12 @@ export default function DashboardView() {
           </GlassCard>
         ) : rowsLoading || !rows ? (
           Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton-shimmer h-28 w-full rounded-xl" />)
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 ? (
           <GlassCard className="p-0">
-            <EmptyQueue onLaunch={() => navigate("screening")} />
+            <EmptyQueue onLaunch={() => navigate("screening")} searching={query.trim() !== ""} query={query.trim()} />
           </GlassCard>
         ) : (
-          rows.map((r) => {
+          visibleRows.map((r) => {
             const gColor = rowGradeColor(r);
             return (
               <GlassCard

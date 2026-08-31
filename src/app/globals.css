@@ -297,6 +297,15 @@
   animation: cam-breathe 3s ease-in-out infinite;
 }
 
+/* ── Floating card rise-in (install prompt etc.) ───────────────────── */
+@keyframes rise-in {
+  from { transform: translateY(10px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+.rise-in {
+  animation: rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* ── Reduced motion ────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *,
