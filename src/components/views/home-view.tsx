@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Eye,
+  MapPinned,
   Microscope,
   Play,
   Route,
@@ -17,6 +18,7 @@ import {
   ScanSearch,
   ShieldCheck,
   Stethoscope,
+  TrendingUp,
   Users,
   XCircle,
 } from "lucide-react";
@@ -24,7 +26,13 @@ import { AnimatedNumber } from "@/components/drishti/animated-number";
 import { GlassCard, Reveal, SectionHeading } from "@/components/drishti/primitives";
 import { RetinaView } from "@/components/drishti/retina-view";
 import { useNav } from "@/components/drishti/shell";
-import { VALIDATED_METRICS } from "@/lib/drishti";
+import { Slider } from "@/components/ui/slider";
+import {
+  CAPACITY_PARAMS,
+  CAPACITY_PRESETS,
+  VALIDATED_METRICS,
+  computeCapacity,
+} from "@/lib/drishti";
 
 const HeroEye = dynamic(() => import("@/components/views/hero-eye"), { ssr: false, loading: () => null });
 
@@ -419,7 +427,175 @@ function ValidationBanner() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 6) FINAL CTA
+// 6) IMPACT PROJECTION — capacity math tied to the 100k/year story
+// ─────────────────────────────────────────────────────────────────────
+
+/** Published referable-DR prevalence among known diabetics (range ≈ 5–10%). */
+const REFERABLE_PREVALENCE = 0.06;
+/** Vision-threatening DR (PDR / treatable DME) share — ≈ 1.5%. */
+const VTDR_PREVALENCE = 0.015;
+/** Share of cases a human must review when DRISHTI auto-clears HIGH-trust ones. */
+const HUMAN_REVIEW_SHARE = 0.35;
+const DISTRICT_MAX = 20;
+
+function ImpactProjection() {
+  const { navigate } = useNav();
+  const [districts, setDistricts] = useState(5);
+
+  // each district runs the "District pilot" preset (3 cameras · 2 reviewers · 25/hr)
+  const per = computeCapacity({
+    cams: CAPACITY_PRESETS.district.cams,
+    revw: CAPACITY_PRESETS.district.revw,
+    arr: CAPACITY_PRESETS.district.arr,
+  });
+  const perYear = per.patientsPerYear * districts;
+  const referable = Math.round(perYear * REFERABLE_PREVALENCE);
+  const vtdr = Math.round(perYear * VTDR_PREVALENCE);
+  const graderHoursSaved = Math.round((perYear * (1 - HUMAN_REVIEW_SHARE) * CAPACITY_PARAMS.reviewMinPerCase) / 60);
+  const pctOfMillion = Math.min(100, (perYear / 1_000_000) * 100);
+
+  const impacts = [
+    {
+      icon: ScanEye,
+      value: perYear,
+      label: "Patients screened / year",
+      sub: `${per.patientsPerDay.toLocaleString("en-IN")}/day per district × ${districts}`,
+      text: "text-[#22D3EE]",
+      iconWrap: "border-[#22D3EE]/30 bg-[#22D3EE]/10 text-[#22D3EE]",
+    },
+    {
+      icon: Stethoscope,
+      value: referable,
+      label: "Referable DR caught",
+      sub: "grade ≥ Moderate NPDR · referred within 3–6 months",
+      text: "text-[#FBBF24]",
+      iconWrap: "border-[#FBBF24]/30 bg-[#FBBF24]/10 text-[#FBBF24]",
+    },
+    {
+      icon: ShieldCheck,
+      value: vtdr,
+      label: "Vision-threatening flagged",
+      sub: "PDR / DME · same-day urgent routing",
+      text: "text-[#F87171]",
+      iconWrap: "border-[#F87171]/30 bg-[#F87171]/10 text-[#F87171]",
+    },
+    {
+      icon: TrendingUp,
+      value: graderHoursSaved,
+      label: "Grader hours saved / year",
+      sub: `65% auto-cleared × ${CAPACITY_PARAMS.reviewMinPerCase} min per case`,
+      text: "text-[#34D399]",
+      iconWrap: "border-[#34D399]/30 bg-[#34D399]/10 text-[#34D399]",
+    },
+  ];
+
+  return (
+    <section id="home-impact" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-16 sm:px-6 sm:py-24">
+      <SectionHeading
+        eyebrow="IMPACT PROJECTION"
+        title="From one district to a million screenings."
+        sub="The same trust-gated pipeline that fits in a PHC scales by multiplication — drag the slider and watch the numbers move. Powered by the planner's M/M/c capacity model."
+      />
+
+      <Reveal>
+        <GlassCard className="p-5 sm:p-8">
+          <div className="grid items-center gap-8 lg:grid-cols-[280px_1fr]">
+            {/* slider column */}
+            <div className="space-y-5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <MapPinned className="h-4 w-4 text-[#22D3EE]" aria-hidden="true" />
+                  Districts deployed
+                </span>
+                <span className="tabular chip border-[#22D3EE]/40 bg-[#22D3EE]/10 font-display text-base font-bold text-[#22D3EE]">
+                  {districts}
+                </span>
+              </div>
+              <Slider
+                value={[districts]}
+                min={1}
+                max={DISTRICT_MAX}
+                step={1}
+                aria-label={`Districts deployed: ${districts}`}
+                onValueChange={(v) => setDistricts(v[0] ?? 1)}
+              />
+              <div className="flex justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+                <span>1 district</span>
+                <span>{DISTRICT_MAX} districts</span>
+              </div>
+              <div className="space-y-1 rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs">
+                <p className="font-semibold text-foreground">Each district =</p>
+                <p className="text-muted-foreground">
+                  {CAPACITY_PRESETS.district.cams} cameras · {CAPACITY_PRESETS.district.revw} reviewers ·{" "}
+                  {CAPACITY_PRESETS.district.arr} walk-ins/hr · {CAPACITY_PARAMS.hoursPerDay}h day ·{" "}
+                  {CAPACITY_PARAMS.workingDays} days/yr
+                </p>
+              </div>
+            </div>
+
+            {/* stats column */}
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                {impacts.map((s) => (
+                  <div key={s.label} className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                    <span className={`flex h-8 w-8 items-center justify-center rounded-lg border ${s.iconWrap}`}>
+                      <s.icon className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <p className={`mt-3 font-display text-2xl font-bold leading-none tracking-tight sm:text-[26px] ${s.text}`}>
+                      <AnimatedNumber value={s.value} duration={500} />
+                    </p>
+                    <p className="mt-2 text-xs font-semibold text-foreground">{s.label}</p>
+                    <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{s.sub}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* progress to 1M / year */}
+              <div>
+                <div className="flex items-baseline justify-between text-xs">
+                  <span className="font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Progress toward 1,000,000 screenings / year
+                  </span>
+                  <span className="tabular font-semibold text-[#22D3EE]">{pctOfMillion.toFixed(1)}%</span>
+                </div>
+                <div
+                  className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/[0.06]"
+                  role="progressbar"
+                  aria-valuenow={Math.round(pctOfMillion)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Progress toward one million screenings per year"
+                >
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#0E7490] via-[#22D3EE] to-[#34D399] transition-[width] duration-300 ease-out"
+                    style={{ width: `${Math.max(2, pctOfMillion)}%`, boxShadow: "0 0 12px rgba(34,211,238,0.45)" }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Assumes {Math.round(REFERABLE_PREVALENCE * 100)}% referable-DR prevalence (published range 5–10%) and{" "}
+              {Math.round(VTDR_PREVALENCE * 10) / 10}% vision-threatening DR among screened diabetics — modeled, not
+              measured.
+            </p>
+            <button
+              onClick={() => navigate("capacity")}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-[#22D3EE]/40 bg-white/[0.03] px-5 py-2.5 text-sm font-semibold text-[#22D3EE] transition-colors hover:bg-[#22D3EE]/10"
+            >
+              Tune it in the Capacity Planner <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+        </GlassCard>
+      </Reveal>
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 7) FINAL CTA
 // ─────────────────────────────────────────────────────────────────────
 
 function FinalCta() {
@@ -458,6 +634,7 @@ export default function HomeView() {
       <PipelinePreview />
       <TrustGateTeaser />
       <ValidationBanner />
+      <ImpactProjection />
       <FinalCta />
     </>
   );

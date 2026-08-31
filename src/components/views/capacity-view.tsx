@@ -25,6 +25,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { AnimatedNumber } from "@/components/drishti/animated-number";
+import { DarkTip } from "@/components/drishti/chart-frame";
 import { GlassCard, Reveal, SectionHeading } from "@/components/drishti/primitives";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -174,31 +175,14 @@ function Knob({
   );
 }
 
-/** Dark recharts tooltip for the scaling chart. */
-function ScalingTip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: ReadonlyArray<{ value?: string | number }>;
-  label?: string | number;
-}) {
-  if (!active || !payload || payload.length === 0) return null;
-  const v = Number(payload[0].value ?? 0);
-  return (
-    <div className="rounded-lg border border-[#22D3EE]/25 bg-[#081120]/95 px-3 py-2 text-xs shadow-[0_8px_24px_rgba(0,0,0,0.55)]">
-      <div className="font-display font-semibold text-[#E6F1FF]">
-        {label} district{Number(label) === 1 ? "" : "s"}
-      </div>
-      <div className="mt-0.5 flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: CYAN }} />
-        <span className="text-muted-foreground">Patients / year</span>
-        <span className="tabular font-medium text-[#E6F1FF]">{v.toLocaleString("en-IN")}</span>
-      </div>
-    </div>
-  );
-}
+// The scaling-chart tooltip is the shared DarkTip primitive (chart-frame.tsx),
+// configured below for district labels + locale-formatted patient counts.
+const scalingTipContent = (
+  <DarkTip
+    labelFormatter={(label) => `${label} district${Number(label) === 1 ? "" : "s"}`}
+    valueFormatter={(v) => v.toLocaleString("en-IN")}
+  />
+);
 
 // ────────────────────────────────────────────────────────────
 // View
@@ -608,7 +592,7 @@ export default function CapacityView() {
                   width={48}
                   tickFormatter={(v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))}
                 />
-                <RTooltip content={<ScalingTip />} cursor={{ stroke: "rgba(34,211,238,0.25)", strokeDasharray: "3 3" }} />
+                <RTooltip content={scalingTipContent} cursor={{ stroke: "rgba(34,211,238,0.25)", strokeDasharray: "3 3" }} />
                 <ReferenceLine
                   y={100000}
                   stroke={AMBER}

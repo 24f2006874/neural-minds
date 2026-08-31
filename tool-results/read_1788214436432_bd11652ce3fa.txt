@@ -1,0 +1,638 @@
+     1→/**
+     2→ * DRISHTI — Trust-Gated DR Screening
+     3→ * Shared domain library: types, constants, pipeline simulation, metrics, capacity math.
+     4→ * Single source of truth for both API routes and frontend views.
+     5→ *
+     6→ * HONESTY RULES (keep our credibility):
+     7→ * - "validated on 550 held-out APTOS images" — never "certified" or "clinical-grade"
+     8→ * - Cite: Data: APTOS 2019, Aravind Eye Hospital (Kaggle) / STARE — Clemson
+     9→ * - Demo data is labeled as demo. Trust thresholds: HIGH >= 0.76, MODERATE 0.55-0.76, LOW < 0.55
+    10→ */
+    11→
+    12→// ────────────────────────────────────────────────────────────
+    13→// Types
+    14→// ────────────────────────────────────────────────────────────
+    15→
+    16→export type TrustLevel = "HIGH" | "MODERATE" | "LOW";
+    17→export type CaseStatus = "AUTO_CLEARED" | "NEEDS_REVIEW" | "URGENT" | "REJECTED";
+    18→
+    19→export interface GateResult {
+    20→  quality_score: number;
+    21→  accepted: boolean;
+    22→  enhanced: boolean;
+    23→  message: string;
+    24→}
+    25→
+    26→export interface EvidenceResult {
+    27→  ma_count: number;
+    28→  hem_count: number;
+    29→  ex_count: number;
+    30→  vessel_density_pct: number;
+    31→  dme_risk: boolean;
+    32→  dme_message: string;
+    33→  /** Normalized lesion coordinates (0-1 in image space) for overlay rendering */
+    34→  lesions: {
+    35→    microaneurysms: Array<{ x: number; y: number; r: number }>;
+    36→    hemorrhages: Array<{ x: number; y: number; r: number }>;
+    37→    exudates: Array<{ x: number; y: number; r: number }>;
+    38→  };
+    39→  /** Grad-CAM config for the explainability overlay */
+    40→  gradcam: { cx: number; cy: number; rx: number; ry: number; intensity: number };
+    41→}
+    42→
+    43→export interface ClassificationResult {
+    44→  predicted_class: string;
+    45→  class_level: number; // ICDR 0-4
+    46→  confidence: number;
+    47→  probabilities: Record<string, number>;
+    48→}
+    49→
+    50→export interface ExplainabilityResult {
+    51→  consistency: number;
+    52→  verdict: TrustLevel;
+    53→  centroid_distance_dd: number;
+    54→  region_overlap: number;
+    55→}
+    56→
+    57→export interface TrustResult {
+    58→  trust_score: number;
+    59→  trust_level: TrustLevel;
+    60→  route: string;
+    61→}
+    62→
+    63→export interface ScreeningResult {
+    64→  patient_id: string;
+    65→  created_at: string;
+    66→  gate: GateResult;
+    67→  evidence: EvidenceResult;
+    68→  classification: ClassificationResult;
+    69→  explainability: ExplainabilityResult;
+    70→  trust: TrustResult;
+    71→  status: CaseStatus;
+    72→  report_url: string;
+    73→  timings_ms: { gate: number; evidence: number; classify: number; explain: number; total: number };
+    74→}
+    75→
+    76→// ────────────────────────────────────────────────────────────
+    77→// Constants — THE single source of trust thresholds & validated metrics
+    78→// ────────────────────────────────────────────────────────────
+    79→
+    80→export const TRUST_THRESHOLDS = { HIGH: 0.76, MODERATE_LOW: 0.55 } as const;
+    81→
+    82→export const VALIDATED_METRICS = {
+    83→  sensitivity: 92.8, // % — referable DR detected
+    84→  specificity: 94.5, // %
+    85→  qwk: 0.899, // quadratic weighted kappa
+    86→  auc: 0.984,
+    87→  dataset: "550 held-out APTOS images",
+    88→  runs: [
+    89→    { run: "Run 1", sensitivity: 91.0, specificity: 92.7, seed: 42 },
+    90→    { run: "Run 2", sensitivity: 92.8, specificity: 94.5, seed: 1337 },
+    91→    { run: "Run 3", sensitivity: 93.7, specificity: 94.2, seed: 2025 },
+    92→  ],
+    93→} as const;
+    94→
+    95→export const ICDR_CLASSES = [
+    96→  { level: 0, label: "No DR", short: "No DR (Level 0)", color: "#34D399", action: "Routine re-screen in 12 months" },
+    97→  { level: 1, label: "Mild NPDR", short: "Mild NPDR (Level 1)", color: "#A3E635", action: "Re-screen in 6-12 months" },
+    98→  { level: 2, label: "Moderate NPDR", short: "Moderate NPDR (Level 2)", color: "#FBBF24", action: "Refer within 3-6 months" },
+    99→  { level: 3, label: "Severe NPDR", short: "Severe NPDR (Level 3)", color: "#FB923C", action: "Refer within 4 weeks" },
+   100→  { level: 4, label: "PDR", short: "PDR - Urgent (Level 4)", color: "#F87171", action: "Urgent referral — within 1 week" },
+   101→] as const;
+   102→
+   103→export const PROB_LABELS = [
+   104→  "No DR (Level 0)",
+   105→  "Mild NPDR (Level 1)",
+   106→  "Moderate NPDR (Level 2)",
+   107→  "Severe NPDR (Level 3)",
+   108→  "PDR - Urgent (Level 4)",
+   109→] as const;
+   110→
+   111→// ────────────────────────────────────────────────────────────
+   112→// Deterministic pseudo-random generator (seeded)
+   113→// ────────────────────────────────────────────────────────────
+   114→
+   115→export function seededRandom(seedStr: string): () => number {
+   116→  let h = 2166136261;
+   117→  for (let i = 0; i < seedStr.length; i++) {
+   118→    h ^= seedStr.charCodeAt(i);
+   119→    h = Math.imul(h, 16777619);
+   120→  }
+   121→  return () => {
+   122→    h ^= h << 13;
+   123→    h ^= h >>> 17;
+   124→    h ^= h << 5;
+   125→    return ((h >>> 0) % 100000) / 100000;
+   126→  };
+   127→}
+   128→
+   129→function clamp(v: number, min: number, max: number) {
+   130→  return Math.min(max, Math.max(min, v));
+   131→}
+   132→
+   133→/** Poisson-ish count from a seeded rng */
+   134→function poissonCount(rng: () => number, lambda: number): number {
+   135→  // Simple approximation good enough for demo counts
+   136→  const base = Math.round(lambda * (0.5 + rng()));
+   137→  return Math.max(0, base);
+   138→}
+   139→
+   140→/** Ring of points around macula for exudates in DME-risk cases */
+   141→function ringPoints(cx: number, cy: number, radius: number, count: number, rng: () => number, rBase: number) {
+   142→  const pts: Array<{ x: number; y: number; r: number }> = [];
+   143→  for (let i = 0; i < count; i++) {
+   144→    const a = (i / count) * Math.PI * 2 + rng() * 0.6;
+   145→    const rr = radius * (0.75 + rng() * 0.5);
+   146→    pts.push({ x: clamp(cx + Math.cos(a) * rr, 0.1, 0.9), y: clamp(cy + Math.sin(a) * rr, 0.1, 0.9), r: rBase * (0.7 + rng() * 0.9) });
+   147→  }
+   148→  return pts;
+   149→}
+   150→
+   151→function scatterPoints(count: number, rng: () => number, rBase: number, zones: Array<{ cx: number; cy: number; rad: number; w: number }>) {
+   152→  const pts: Array<{ x: number; y: number; r: number }> = [];
+   153→  for (let i = 0; i < count; i++) {
+   154→    // choose a zone weighted
+   155→    let z = zones[0];
+   156→    const t = rng() * zones.reduce((s, zz) => s + zz.w, 0);
+   157→    let acc = 0;
+   158→    for (const zz of zones) {
+   159→      acc += zz.w;
+   160→      if (t <= acc) { z = zz; break; }
+   161→    }
+   162→    const a = rng() * Math.PI * 2;
+   163→    const rr = Math.sqrt(rng()) * z.rad;
+   164→    pts.push({
+   165→      x: clamp(z.cx + Math.cos(a) * rr, 0.06, 0.94),
+   166→      y: clamp(z.cy + Math.sin(a) * rr, 0.06, 0.94),
+   167→      r: rBase * (0.6 + rng() * 1.1),
+   168→    });
+   169→  }
+   170→  return pts;
+   171→}
+   172→
+   173→// ────────────────────────────────────────────────────────────
+   174→// Lesion geometry builder — shared by API + frontend SVG renderer
+   175→// ────────────────────────────────────────────────────────────
+   176→
+   177→export interface LesionConfig {
+   178→  maCount: number;
+   179→  hemCount: number;
+   180→  exCount: number;
+   181→  dmeRisk: boolean;
+   182→  severity: number; // 0-4
+   183→}
+   184→
+   185→export function buildLesions(patientId: string, cfg: LesionConfig): EvidenceResult["lesions"] {
+   186→  const rng = seededRandom(`lesions:${patientId}`);
+   187→  // Optic disc ~ (0.30, 0.38), macula ~ (0.62, 0.55) in normalized coords
+   188→  const disc = { cx: 0.3, cy: 0.38 };
+   189→  const macula = { cx: 0.62, cy: 0.55 };
+   190→
+   191→  const maZones = [
+   192→    { cx: macula.cx, cy: macula.cy, rad: 0.26, w: 5 },
+   193→    { cx: disc.cx, cy: disc.cy, rad: 0.22, w: 3 },
+   194→    { cx: 0.5, cy: 0.5, rad: 0.4, w: 2 },
+   195→  ];
+   196→  const hemZones = [
+   197→    { cx: macula.cx, cy: macula.cy, rad: 0.3, w: 4 },
+   198→    { cx: disc.cx, cy: disc.cy, rad: 0.26, w: 4 },
+   199→  ];
+   200→
+   201→  const microaneurysms = scatterPoints(Math.min(cfg.maCount, 60), rng, 0.006, maZones);
+   202→  const hemorrhages = scatterPoints(Math.min(cfg.hemCount, 24), rng, 0.016, hemZones);
+   203→  const exudates = cfg.dmeRisk
+   204→    ? [...ringPoints(macula.cx, macula.cy, 0.11, Math.min(14, cfg.exCount), rng, 0.012),
+   205→       ...scatterPoints(Math.max(0, Math.min(cfg.exCount - 14, 20)), rng, 0.01, [{ cx: macula.cx, cy: macula.cy, rad: 0.3, w: 3 }, { cx: disc.cx, cy: disc.cy, rad: 0.24, w: 2 }])]
+   206→    : scatterPoints(Math.min(cfg.exCount, 22), rng, 0.011, [{ cx: disc.cx, cy: disc.cy, rad: 0.24, w: 3 }, { cx: macula.cx, cy: macula.cy, rad: 0.34, w: 2 }]);
+   207→
+   208→  return { microaneurysms, hemorrhages, exudates };
+   209→}
+   210→
+   211→export function buildGradcam(patientId: string, severity: number, dmeRisk: boolean): EvidenceResult["gradcam"] {
+   212→  const rng = seededRandom(`gradcam:${patientId}`);
+   213→  if (severity === 0) {
+   214→    // healthy model looks at disc/vessels faintly
+   215→    return { cx: 0.3, cy: 0.38, rx: 0.14, ry: 0.13, intensity: 0.32 };
+   216→  }
+   217→  if (dmeRisk) {
+   218→    return { cx: 0.62, cy: 0.55, rx: 0.16, ry: 0.15, intensity: 0.95 };
+   219→  }
+   220→  const cx = 0.34 + rng() * 0.3;
+   221→  const cy = 0.4 + rng() * 0.25;
+   222→  return { cx, cy, rx: 0.12 + severity * 0.025, ry: 0.11 + severity * 0.025, intensity: 0.55 + severity * 0.1 };
+   223→}
+   224→
+   225→// ────────────────────────────────────────────────────────────
+   226→// Demo showcase cases (exact, hand-tuned results)
+   227→// ────────────────────────────────────────────────────────────
+   228→
+   229→export interface DemoCase {
+   230→  id: string;
+   231→  label: string;
+   232→  blurb: string;
+   233→  result: Omit<ScreeningResult, "created_at" | "report_url">;
+   234→}
+   235→
+   236→function timings(gate: number, evidence: number, classify: number, explain: number) {
+   237→  return { gate, evidence, classify, explain, total: gate + evidence + classify + explain };
+   238→}
+   239→
+   240→export const DEMO_CASES: DemoCase[] = [
+   241→  {
+   242→    id: "SEVERE-001",
+   243→    label: "Severe DR",
+   244→    blurb: "PDR-adjacent case — urgent referral, LOW trust → doctor review",
+   245→    result: {
+   246→      patient_id: "SEVERE-001",
+   247→      gate: { quality_score: 0.88, accepted: true, enhanced: true, message: "Sharp fundus image — PASS" },
+   248→      evidence: {
+   249→        ma_count: 118, hem_count: 44, ex_count: 31, vessel_density_pct: 13.8,
+   250→        dme_risk: true, dme_message: "URGENT: exudates within 0.29 DD of fovea",
+   251→        lesions: { microaneurysms: [], hemorrhages: [], exudates: [] },
+   252→        gradcam: { cx: 0.6, cy: 0.52, rx: 0.18, ry: 0.17, intensity: 0.96 },
+   253→      },
+   254→      classification: {
+   255→        predicted_class: "Severe NPDR (Level 3)", class_level: 3, confidence: 0.842,
+   256→        probabilities: { "No DR (Level 0)": 0.004, "Mild NPDR (Level 1)": 0.011, "Moderate NPDR (Level 2)": 0.063, "Severe NPDR (Level 3)": 0.842, "PDR - Urgent (Level 4)": 0.08 },
+   257→      },
+   258→      explainability: { consistency: 0.861, verdict: "MODERATE", centroid_distance_dd: 0.41, region_overlap: 0.88 },
+   259→      trust: { trust_score: 0.61, trust_level: "MODERATE", route: "REVIEW — queued for ophthalmologist sign-off" },
+   260→      status: "NEEDS_REVIEW",
+   261→      timings_ms: timings(780, 1420, 1180, 1520),
+   262→    },
+   263→  },
+   264→  {
+   265→    id: "REVIEW-001",
+   266→    label: "Referable NPDR",
+   267→    blurb: "Referable case with DME alert — MODERATE trust → review queue",
+   268→    result: {
+   269→      patient_id: "REVIEW-001",
+   270→      gate: { quality_score: 0.82, accepted: true, enhanced: true, message: "Good quality after CLAHE enhancement" },
+   271→      evidence: {
+   272→        ma_count: 100, hem_count: 41, ex_count: 22, vessel_density_pct: 11.3,
+   273→        dme_risk: true, dme_message: "URGENT: exudate within 0.29 DD of fovea",
+   274→        lesions: { microaneurysms: [], hemorrhages: [], exudates: [] },
+   275→        gradcam: { cx: 0.62, cy: 0.55, rx: 0.16, ry: 0.15, intensity: 0.95 },
+   276→      },
+   277→      classification: {
+   278→        predicted_class: "Moderate NPDR (Level 2)", class_level: 2, confidence: 0.658,
+   279→        probabilities: { "No DR (Level 0)": 0.27, "Mild NPDR (Level 1)": 0.012, "Moderate NPDR (Level 2)": 0.658, "Severe NPDR (Level 3)": 0.043, "PDR - Urgent (Level 4)": 0.017 },
+   280→      },
+   281→      explainability: { consistency: 0.903, verdict: "HIGH", centroid_distance_dd: 0.73, region_overlap: 1.0 },
+   282→      trust: { trust_score: 0.789, trust_level: "HIGH", route: "TRUSTED — auto screening recommendation" },
+   283→      status: "AUTO_CLEARED",
+   284→      timings_ms: timings(720, 1350, 1100, 1480),
+   285→    },
+   286→  },
+   287→  {
+   288→    id: "PATIENT-001",
+   289→    label: "Mild NPDR",
+   290→    blurb: "Early-stage disease — clean HIGH trust, routine follow-up",
+   291→    result: {
+   292→      patient_id: "PATIENT-001",
+   293→      gate: { quality_score: 0.91, accepted: true, enhanced: false, message: "Excellent image quality" },
+   294→      evidence: {
+   295→        ma_count: 7, hem_count: 1, ex_count: 0, vessel_density_pct: 9.6,
+   296→        dme_risk: false, dme_message: "",
+   297→        lesions: { microaneurysms: [], hemorrhages: [], exudates: [] },
+   298→        gradcam: { cx: 0.44, cy: 0.46, rx: 0.11, ry: 0.1, intensity: 0.42 },
+   299→      },
+   300→      classification: {
+   301→        predicted_class: "Mild NPDR (Level 1)", class_level: 1, confidence: 0.91,
+   302→        probabilities: { "No DR (Level 0)": 0.062, "Mild NPDR (Level 1)": 0.91, "Moderate NPDR (Level 2)": 0.021, "Severe NPDR (Level 3)": 0.005, "PDR - Urgent (Level 4)": 0.002 },
+   303→      },
+   304→      explainability: { consistency: 0.94, verdict: "HIGH", centroid_distance_dd: 0.52, region_overlap: 0.95 },
+   305→      trust: { trust_score: 0.93, trust_level: "HIGH", route: "TRUSTED — auto screening recommendation" },
+   306→      status: "AUTO_CLEARED",
+   307→      timings_ms: timings(690, 1280, 1050, 1400),
+   308→    },
+   309→  },
+   310→  {
+   311→    id: "NORMAL-001",
+   312→    label: "Healthy",
+   313→    blurb: "Clean fundus — auto-cleared in seconds",
+   314→    result: {
+   315→      patient_id: "NORMAL-001",
+   316→      gate: { quality_score: 0.94, accepted: true, enhanced: false, message: "Excellent image quality" },
+   317→      evidence: {
+   318→        ma_count: 0, hem_count: 0, ex_count: 0, vessel_density_pct: 8.9,
+   319→        dme_risk: false, dme_message: "",
+   320→        lesions: { microaneurysms: [], hemorrhages: [], exudates: [] },
+   321→        gradcam: { cx: 0.3, cy: 0.38, rx: 0.14, ry: 0.13, intensity: 0.3 },
+   322→      },
+   323→      classification: {
+   324→        predicted_class: "No DR (Level 0)", class_level: 0, confidence: 0.974,
+   325→        probabilities: { "No DR (Level 0)": 0.974, "Mild NPDR (Level 1)": 0.019, "Moderate NPDR (Level 2)": 0.005, "Severe NPDR (Level 3)": 0.001, "PDR - Urgent (Level 4)": 0.001 },
+   326→      },
+   327→      explainability: { consistency: 0.96, verdict: "HIGH", centroid_distance_dd: 0.18, region_overlap: 1.0 },
+   328→      trust: { trust_score: 0.96, trust_level: "HIGH", route: "TRUSTED — auto screening recommendation" },
+   329→      status: "AUTO_CLEARED",
+   330→      timings_ms: timings(640, 1180, 980, 1320),
+   331→    },
+   332→  },
+   333→  {
+   334→    id: "BADPHOTO-001",
+   335→    label: "Blurry photo",
+   336→    blurb: "Quality gate REJECTS the image — recapture before any AI runs",
+   337→    result: {
+   338→      patient_id: "BADPHOTO-001",
+   339→      gate: { quality_score: 0.34, accepted: false, enhanced: false, message: "REJECTED — image too blurry. Recapture required." },
+   340→      evidence: {
+   341→        ma_count: 0, hem_count: 0, ex_count: 0, vessel_density_pct: 0,
+   342→        dme_risk: false, dme_message: "",
+   343→        lesions: { microaneurysms: [], hemorrhages: [], exudates: [] },
+   344→        gradcam: { cx: 0.5, cy: 0.5, rx: 0.1, ry: 0.1, intensity: 0 },
+   345→      },
+   346→      classification: {
+   347→        predicted_class: "—", class_level: -1, confidence: 0,
+   348→        probabilities: { "No DR (Level 0)": 0, "Mild NPDR (Level 1)": 0, "Moderate NPDR (Level 2)": 0, "Severe NPDR (Level 3)": 0, "PDR - Urgent (Level 4)": 0 },
+   349→      },
+   350→      explainability: { consistency: 0, verdict: "LOW", centroid_distance_dd: 0, region_overlap: 0 },
+   351→      trust: { trust_score: 0.18, trust_level: "LOW", route: "REJECTED — recapture image" },
+   352→      status: "REJECTED",
+   353→      timings_ms: timings(810, 0, 0, 0),
+   354→    },
+   355→  },
+   356→];
+   357→
+   358→// ────────────────────────────────────────────────────────────
+   359→// Pipeline simulation — runs the "whole pipeline" for any input
+   360→// ────────────────────────────────────────────────────────────
+   361→
+   362→export function runSimulatedPipeline(patientId: string, imageHint?: string): ScreeningResult {
+   363→  const demo = DEMO_CASES.find((c) => c.id === patientId);
+   364→  if (demo) {
+   365→    const base = demo.result;
+   366→    const withLesions: ScreeningResult = {
+   367→      ...base,
+   368→      created_at: new Date().toISOString(),
+   369→      evidence: {
+   370→        ...base.evidence,
+   371→        lesions: buildLesions(patientId, {
+   372→          maCount: base.evidence.ma_count,
+   373→          hemCount: base.evidence.hem_count,
+   374→          exCount: base.evidence.ex_count,
+   375→          dmeRisk: base.evidence.dme_risk,
+   376→          severity: base.classification.class_level,
+   377→        }),
+   378→      },
+   379→      report_url: `/api/patients/${patientId}`,
+   380→      timings_ms: base.timings_ms,
+   381→    };
+   382→    return withLesions;
+   383→  }
+   384→
+   385→  // Unknown patient: deterministic synthesis seeded by id (+ optional image bytes hash)
+   386→  const rng = seededRandom(`pipeline:${patientId}:${imageHint ?? ""}`);
+   387→  const quality = clamp(0.55 + rng() * 0.45, 0.55, 1);
+   388→  const severity = quality < 0.62 ? (rng() > 0.5 ? 1 : 2) : Math.floor(rng() * 5);
+   389→  const accept = quality >= 0.6;
+   390→
+   391→  if (!accept) {
+   392→    const bad: ScreeningResult = {
+   393→      patient_id: patientId,
+   394→      created_at: new Date().toISOString(),
+   395→      gate: { quality_score: Number(quality.toFixed(2)), accepted: false, enhanced: false, message: "REJECTED — poor image quality. Recapture required." },
+   396→      evidence: DEMO_CASES[4].result.evidence,
+   397→      classification: DEMO_CASES[4].result.classification,
+   398→      explainability: DEMO_CASES[4].result.explainability,
+   399→      trust: DEMO_CASES[4].result.trust,
+   400→      status: "REJECTED",
+   401→      report_url: `/api/patients/${patientId}`,
+   402→      timings_ms: timings(760, 0, 0, 0),
+   403→    };
+   404→    return bad;
+   405→  }
+   406→
+   407→  const cfgs: Record<number, { ma: number; hem: number; ex: number; vd: number; dme: boolean }> = {
+   408→    0: { ma: 0, hem: 0, ex: 0, vd: 8.9, dme: false },
+   409→    1: { ma: 6, hem: 1, ex: 0, vd: 9.8, dme: false },
+   410→    2: { ma: 38, hem: 12, ex: 9, vd: 10.9, dme: rng() > 0.6 },
+   411→    3: { ma: 84, hem: 27, ex: 19, vd: 12.7, dme: rng() > 0.4 },
+   412→    4: { ma: 131, hem: 52, ex: 34, vd: 14.6, dme: true },
+   413→  };
+   414→  const cfg = cfgs[severity];
+   415→  const conf = clamp(0.62 + rng() * 0.35, 0.62, 0.97);
+   416→  const consistency = clamp(0.72 + rng() * 0.26, 0.72, 0.98);
+   417→  const overlap = clamp(0.62 + rng() * 0.38, 0.62, 1);
+   418→  const centroid = clamp(0.15 + rng() * 0.9, 0.15, 1.05);
+   419→
+   420→  const probs: Record<string, number> = {};
+   421→  const raw = PROB_LABELS.map((_, i) => (i === severity ? conf : rng() * (severity > i ? 0.25 : 0.22)));
+   422→  const sum = raw.reduce((a, b) => a + b, 0);
+   423→  PROB_LABELS.forEach((l, i) => (probs[l] = Number((raw[i] / sum).toFixed(3))));
+   424→  probs[PROB_LABELS[severity]] = Number(conf.toFixed(3));
+   425→
+   426→  const dme = cfg.dme;
+   427→  const trustScore = clamp(0.4 * quality + 0.35 * consistency + 0.25 * (dme ? 0.55 : overlap), 0.3, 0.98);
+   428→  const trustLevel: TrustLevel = trustScore >= TRUST_THRESHOLDS.HIGH ? "HIGH" : trustScore >= TRUST_THRESHOLDS.MODERATE_LOW ? "MODERATE" : "LOW";
+   429→  const status: CaseStatus =
+   430→    severity >= 2 && dme ? "URGENT" : trustLevel === "HIGH" ? (severity >= 2 ? "NEEDS_REVIEW" : "AUTO_CLEARED") : trustLevel === "MODERATE" ? "NEEDS_REVIEW" : "NEEDS_REVIEW";
+   431→  const route =
+   432→    status === "URGENT"
+   433→      ? "URGENT — DME suspected: immediate referral + doctor review"
+   434→      : trustLevel === "HIGH"
+   435→        ? "TRUSTED — auto screening recommendation"
+   436→        : "REVIEW — queued for ophthalmologist sign-off";
+   437→
+   438→  return {
+   439→    patient_id: patientId,
+   440→    created_at: new Date().toISOString(),
+   441→    gate: { quality_score: Number(quality.toFixed(2)), accepted: true, enhanced: quality < 0.75, message: quality < 0.75 ? "Usable after CLAHE enhancement" : "Sharp fundus image — PASS" },
+   442→    evidence: {
+   443→      ma_count: cfg.ma, hem_count: cfg.hem, ex_count: cfg.ex, vessel_density_pct: cfg.vd,
+   444→      dme_risk: dme,
+   445→      dme_message: dme ? `URGENT: exudate within ${(0.2 + rng() * 0.2).toFixed(2)} DD of fovea` : "",
+   446→      lesions: buildLesions(patientId, { maCount: cfg.ma, hemCount: cfg.hem, exCount: cfg.ex, dmeRisk: dme, severity }),
+   447→      gradcam: buildGradcam(patientId, severity, dme),
+   448→    },
+   449→    classification: { predicted_class: ICDR_CLASSES[Math.max(0, severity)].short, class_level: severity, confidence: Number(conf.toFixed(3)), probabilities: probs },
+   450→    explainability: { consistency: Number(consistency.toFixed(3)), verdict: consistency >= TRUST_THRESHOLDS.HIGH ? "HIGH" : "MODERATE", centroid_distance_dd: Number(centroid.toFixed(2)), region_overlap: Number(overlap.toFixed(2)) },
+   451→    trust: { trust_score: Number(trustScore.toFixed(3)), trust_level: trustLevel, route },
+   452→    status,
+   453→    report_url: `/api/patients/${patientId}`,
+   454→    timings_ms: timings(700 + Math.round(rng() * 150), 1250 + Math.round(rng() * 300), 1000 + Math.round(rng() * 250), 1350 + Math.round(rng() * 300)),
+   455→  };
+   456→}
+   457→
+   458→// ────────────────────────────────────────────────────────────
+   459→// Validation data (from our real APTOS validation runs)
+   460→// ────────────────────────────────────────────────────────────
+   461→
+   462→export const CONFUSION_MATRIX = {
+   463→  labels: ["No DR (0)", "Mild (1)", "Moderate (2)", "Severe (3)", "PDR (4)"],
+   464→  // rows = true grade, cols = predicted grade (out of 550 held-out APTOS images)
+   465→  matrix: [
+   466→    [171, 6, 2, 1, 0],
+   467→    [4, 93, 12, 1, 0],
+   468→    [0, 9, 104, 6, 1],
+   469→    [0, 4, 11, 62, 3],
+   470→    [0, 3, 10, 6, 41],
+   471→  ],
+   472→  rowTotals: [180, 110, 120, 80, 60],
+   473→};
+   474→
+   475→export const THRESHOLD_CURVE = [
+   476→  { t: 0.20, sensitivity: 98.2, specificity: 71.5 },
+   477→  { t: 0.25, sensitivity: 97.5, specificity: 76.0 },
+   478→  { t: 0.30, sensitivity: 96.6, specificity: 80.4 },
+   479→  { t: 0.35, sensitivity: 95.8, specificity: 84.1 },
+   480→  { t: 0.40, sensitivity: 95.1, specificity: 87.0 },
+   481→  { t: 0.45, sensitivity: 94.3, specificity: 89.6 },
+   482→  { t: 0.50, sensitivity: 93.6, specificity: 91.7 },
+   483→  { t: 0.55, sensitivity: 92.8, specificity: 94.5 },
+   484→  { t: 0.60, sensitivity: 91.2, specificity: 96.0 },
+   485→  { t: 0.65, sensitivity: 89.4, specificity: 97.2 },
+   486→  { t: 0.70, sensitivity: 87.1, specificity: 98.1 },
+   487→  { t: 0.75, sensitivity: 84.0, specificity: 98.8 },
+   488→  { t: 0.80, sensitivity: 79.5, specificity: 99.2 },
+   489→];
+   490→
+   491→export const TRAINING_CURVES = [
+   492→  { run: "Run 1 (seed 42)", color: "#22D3EE", loss: [1.52, 0.94, 0.71, 0.61, 0.55, 0.51, 0.48, 0.46], qwk: [0.62, 0.79, 0.85, 0.88, 0.89, 0.895, 0.898, 0.9] },
+   493→  { run: "Run 2 (seed 1337)", color: "#34D399", loss: [1.48, 0.9, 0.68, 0.58, 0.52, 0.48, 0.45, 0.43], qwk: [0.65, 0.81, 0.86, 0.89, 0.9, 0.9, 0.899, 0.899] },
+   494→  { run: "Run 3 (seed 2025)", color: "#FBBF24", loss: [1.57, 0.97, 0.73, 0.62, 0.56, 0.52, 0.5, 0.48], qwk: [0.6, 0.77, 0.84, 0.87, 0.885, 0.89, 0.892, 0.893] },
+   495→];
+   496→
+   497→export const GRADCAM_GALLERY = [
+   498→  { id: "APTOS-1042", grade: "Moderate NPDR (2)", consistency: 0.94, note: "Model fixates on MA cluster superior to macula" },
+   499→  { id: "APTOS-2217", grade: "Severe NPDR (3)", consistency: 0.91, note: "Venous beading + hemorrhages drive the verdict" },
+   500→  { id: "APTOS-0518", grade: "No DR (0)", consistency: 0.96, note: "Attention rests on optic disc / vessel arcades only" },
+   501→  { id: "APTOS-3390", grade: "PDR (4)", consistency: 0.87, note: "Neovascularization elsewhere flagged, DME zone hot" },
+   502→];
+   503→
+   504→// ────────────────────────────────────────────────────────────
+   505→// Capacity planner math (M/M/c queueing — mirrors module5_capacity_planner.py)
+   506→// ────────────────────────────────────────────────────────────
+   507→
+   508→export interface CapacityInput {
+   509→  cams: number; // cameras (screening stations) 1-10
+   510→  revw: number; // reviewers (ophthalmologists/graders) 1-6
+   511→  arr: number; // arrivals per hour 10-60
+   512→}
+   513→
+   514→export interface CapacityOutput {
+   515→  patientsPerDay: number;
+   516→  patientsPerYear: number;
+   517→  meanWaitMin: number;
+   518→  utilizationPct: number;
+   519→  reviewUtilizationPct: number;
+   520→  reviewWaitMin: number;
+   521→  bottleneck: "CAPTURE" | "REVIEW" | "BALANCED";
+   522→  queueLength: number;
+   523→  serviceMinPerPatient: number;
+   524→}
+   525→
+   526→function erlangC(lambda: number, mu: number, c: number): { wq: number; rho: number } {
+   527→  // lambda: arrival rate /hr, mu: service rate per server /hr, c: servers
+   528→  const a = lambda / mu; // offered load
+   529→  if (a >= c) return { wq: Infinity, rho: 1 };
+   530→  const rho = a / c;
+   531→  // Erlang C formula
+   532→  let sum = 0;
+   533→  for (let n = 0; n < c; n++) sum += Math.pow(a, n) / factorial(n);
+   534→  const last = Math.pow(a, c) / (factorial(c) * (1 - rho));
+   535→  const cProb = last / (sum + last);
+   536→  const wq = cProb / (c * mu - lambda); // hours
+   537→  return { wq: wq * 60, rho }; // minutes
+   538→}
+   539→
+   540→function factorial(n: number): number {
+   541→  let f = 1;
+   542→  for (let i = 2; i <= n; i++) f *= i;
+   543→  return f;
+   544→}
+   545→
+   546→export const CAPACITY_PARAMS = {
+   547→  captureMinPerPatient: 4, // minutes per capture at a camera station
+   548→  reviewMinPerCase: 2.5, // minutes of reviewer time per case
+   549→  hoursPerDay: 8,
+   550→  workingDays: 250,
+   551→};
+   552→
+   553→export function computeCapacity(input: CapacityInput): CapacityOutput {
+   554→  const { cams, revw, arr } = input;
+   555→  const { captureMinPerPatient, reviewMinPerCase, hoursPerDay, workingDays } = CAPACITY_PARAMS;
+   556→
+   557→  const lambda = arr; // per hour
+   558→  const captureMu = 60 / captureMinPerPatient; // per station per hour
+   559→  const captureCap = cams * captureMu;
+   560→
+   561→  // capture stage: effectively M/M/c with c = cams
+   562→  const cap = erlangC(lambda, captureMu, cams);
+   563→  const captureUtil = clamp(lambda / captureCap, 0, 1);
+   564→
+   565→  // review stage: high-trust cases auto-cleared (~65%), others need human review
+   566→  const reviewLambda = lambda * 0.35;
+   567→  const reviewMu = 60 / reviewMinPerCase;
+   568→  const rev = erlangC(reviewLambda, reviewMu, revw);
+   569→  const reviewUtil = clamp(reviewLambda / (revw * reviewMu), 0, 1);
+   570→
+   571→  const throughput = Math.min(lambda, captureCap);
+   572→  const patientsPerDay = Math.round(throughput * hoursPerDay);
+   573→  const patientsPerYear = patientsPerDay * workingDays;
+   574→
+   575→  const waitMin = isFinite(cap.wq) ? cap.wq : 999;
+   576→  const reviewWaitMin = isFinite(rev.wq) ? rev.wq : 999;
+   577→  const meanWaitMin = waitMin + (throughput > 0 ? reviewWaitMin * 0.35 : 0);
+   578→
+   579→  const utilizationPct = Math.round(captureUtil * 100);
+   580→  const bottleneck: CapacityOutput["bottleneck"] =
+   581→    captureUtil > reviewUtil + 0.08 ? "CAPTURE" : reviewUtil > captureUtil + 0.08 ? "REVIEW" : "BALANCED";
+   582→
+   583→  // Little's law for queue visualization
+   584→  const queueLength = isFinite(cap.wq) ? (lambda * (cap.wq / 60)) : 30;
+   585→
+   586→  return {
+   587→    patientsPerDay,
+   588→    patientsPerYear,
+   589→    meanWaitMin: Math.round(meanWaitMin * 10) / 10,
+   590→    utilizationPct,
+   591→    reviewUtilizationPct: Math.round(reviewUtil * 100),
+   592→    reviewWaitMin: Math.round(reviewWaitMin * 10) / 10,
+   593→    bottleneck,
+   594→    queueLength: Math.round(queueLength * 10) / 10,
+   595→    serviceMinPerPatient: captureMinPerPatient,
+   596→  };
+   597→}
+   598→
+   599→export const CAPACITY_PRESETS = {
+   600→  phc: { label: "Single PHC", cams: 1, revw: 1, arr: 10 },
+   601→  district: { label: "District pilot", cams: 3, revw: 2, arr: 25 },
+   602→  state: { label: "State scale", cams: 10, revw: 6, arr: 60 },
+   603→} as const;
+   604→
+   605→/** District scaling: patients/year across N district deployments */
+   606→export function districtScaling(cams: number, revw: number, arr: number) {
+   607→  const out: Array<{ districts: number; patientsPerYear: number }> = [];
+   608→  for (let d = 1; d <= 20; d++) {
+   609→    const per = computeCapacity({ cams, revw, arr }).patientsPerYear;
+   610→    out.push({ districts: d, patientsPerYear: per * d });
+   611→  }
+   612→  return out;
+   613→}
+   614→
+   615→// ────────────────────────────────────────────────────────────
+   616→// Team (SIH 2026 · PS 26038 · MathWorks)
+   617→// ────────────────────────────────────────────────────────────
+   618→
+   619→export const TEAM = [
+   620→  { name: "Team Neural Minds", role: "Smart India Hackathon 2026", note: "PS 26038 — MathWorks", initials: "NM" },
+   621→];
+   622→
+   623→export const TEAM_MEMBERS = [
+   624→  { name: "Saurav", role: "UI / Frontend Lead", initials: "SA", color: "#22D3EE", note: "Web platform, pipeline UX" },
+   625→  { name: "ML Lead", role: "Model & Training", initials: "ML", color: "#34D399", note: "CNN training, QWK optimization" },
+   626→  { name: "Pipelines", role: "Modules 1-5 Engineer", initials: "PL", color: "#FBBF24", note: "Quality gate → capacity planner" },
+   627→  { name: "Data", role: "Dataset & Validation", initials: "DA", color: "#F87171", note: "APTOS/STARE curation, 550-image holdout" },
+   628→  { name: "Docs", role: "Research & Pitch", initials: "DO", color: "#A78BFA", note: "Presentation, notebooks, honesty docs" },
+   629→  { name: "Mentor", role: "MathWorks Mentor", initials: "MW", color: "#38BDF8", note: "Guidance & tooling review" },
+   630→];
+   631→
+   632→export const HONESTY_NOTES = [
+   633→  "Validated on 550 held-out APTOS images — not certified as a clinical device.",
+   634→  "Data: APTOS 2019, Aravind Eye Hospital (Kaggle); vessels: STARE (Clemson University).",
+   635→  "Dashboard demo records are simulated — labeled as demo data.",
+   636→  "Trust thresholds HIGH ≥ 0.76 / MODERATE 0.55-0.76 / LOW < 0.55 kept identical across console, API and website.",
+   637→];
+   638→

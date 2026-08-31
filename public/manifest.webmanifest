@@ -1,0 +1,38 @@
+{
+  "name": "DRISHTI — Trust-Gated DR Screening",
+  "short_name": "DRISHTI",
+  "description": "AI that knows when to trust itself — trust-gated diabetic retinopathy screening (SIH 2026 PS 26038)",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#060B14",
+  "theme_color": "#060B14",
+  "orientation": "any",
+  "categories": ["medical", "education"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

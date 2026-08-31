@@ -11,6 +11,7 @@ import {
   RotateCcw,
   ScanEye,
   Send,
+  ShieldCheck,
   TriangleAlert,
   Upload,
 } from "lucide-react";
@@ -43,6 +44,7 @@ interface RecentRun {
   class_level: number;
   trust_level: "HIGH" | "MODERATE" | "LOW";
   status: string;
+  reviewed_by?: string | null;
 }
 
 function timeAgo(iso: string): string {
@@ -600,6 +602,15 @@ export default function ScreeningView() {
                           >
                             <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: dot, boxShadow: `0 0 8px ${dot}66` }} />
                             <span className="font-display min-w-0 flex-1 truncate text-xs font-semibold">{r.patient_id}</span>
+                            {r.reviewed_by && (
+                              <span
+                                className="flex shrink-0 items-center text-[#34D399]"
+                                title={`Signed off by ${r.reviewed_by}`}
+                                aria-label="Signed off by a doctor"
+                              >
+                                <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                              </span>
+                            )}
                             <span className="hidden truncate text-[10px] text-muted-foreground sm:block">{r.grade}</span>
                             <span
                               className="flex shrink-0 items-center gap-1 text-[10px] tabular"

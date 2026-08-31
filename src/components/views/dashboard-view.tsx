@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Timer,
   TriangleAlert,
+  Undo2,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -23,6 +24,16 @@ import { RetinaView } from "@/components/drishti/retina-view";
 import { ConfBar, ScoreDial } from "@/components/drishti/score-dial";
 import { useNav } from "@/components/drishti/shell";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -264,8 +275,9 @@ export default function DashboardView() {
 
   // sign-off audit trail: patientId → who/when (persisted server-side via PATCH)
   const signedOffRef = useRef<Record<string, boolean>>({});
-  const [signedOff, setSignedOff] = useState<Record<string, { by: string; at: string }>>({});
+  const [signedOff, setSignedOff] = useState<Record<string, { by: string; at: string; previousStatus: CaseStatus }>>({});
   const [signingOff, setSigningOff] = useState<string | null>(null);
+  const [reopenTarget, setReopenTarget] = useState<string | null>(null);
   const quietRefreshRef = useRef(false);
 
   const applyOverrides = useCallback(
@@ -406,7 +418,15 @@ export default function DashboardView() {
       const at = data.reviewed_at ? new Date(data.reviewed_at).toLocaleString() : new Date().toLocaleString();
       toast.success(`Signed off by ${data.reviewed_by} — saved to the register`);
       signedOffRef.current = { ...signedOffRef.current, [patientId]: true };
-      setSignedOff((s) => ({ ...s, [patientId]: { by: data.reviewed_by, at } }));
+      // remember the pre-sign-off status so Undo can restore the right queue lane
+      const prevRow = allRows?.find((r) => r.patient_id === patientId) ?? rows?.find((r) => r.patient_id === patientId);
+      const previousStatus: CaseStatus =
+        prevRow && (prevRow.status === "NEEDS_REVIEW" || prevRow.status === "URGENT")
+          ? prevRow.status
+          : detailResult && (detailResult.status === "NEEDS_REVIEW" || detailResult.status === "URGENT")
+            ? detailResult.status
+            : "NEEDS_REVIEW";
+      setSignedOff((s) => ({ ...s, [patientId]: { by: data.reviewed_by, at, previousStatus } }));
       const flip = (r: PatientRow): PatientRow =>
         r.patient_id === patientId
           ? { ...r, status: "AUTO_CLEARED", reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at }
@@ -428,10 +448,61 @@ export default function DashboardView() {
     }
   }
 
+  async function handleReopen(patientId: string) {
+    if (signingOff) return;
+    const record = signedOff[patientId];
+    // post-reload undo can't know the original lane — infer from routing rules
+    // (URGENT = LOW-trust or DME-risk cases jump the queue; everything else is MODERATE review)
+    const previousStatus: CaseStatus =
+      record?.previousStatus ??
+      (detailResult && (detailResult.trust.trust_level === "LOW" || detailResult.evidence.dme_risk) ? "URGENT" : "NEEDS_REVIEW");
+    setSigningOff(patientId);
+    try {
+      const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: previousStatus,
+          reviewed_by: "Dr. Review (dashboard demo)",
+          note: `Sign-off reopened by Dr. Review — case returned to the ${previousStatus === "URGENT" ? "urgent" : "review"} queue`,
+        }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? `API returned ${res.status}`);
+      }
+      toast.success(`Case reopened — returned to the ${previousStatus === "URGENT" ? "urgent" : "review"} queue`);
+      signedOffRef.current = Object.fromEntries(
+        Object.entries(signedOffRef.current).filter(([k]) => k !== patientId)
+      );
+      setSignedOff((s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== patientId)));
+      const flip = (r: PatientRow): PatientRow =>
+        r.patient_id === patientId
+          ? { ...r, status: previousStatus, reviewed_by: null, reviewed_at: null }
+          : r;
+      setAllRows((prev) => (prev ? prev.map(flip) : prev));
+      setRows((prev) => (prev ? prev.map(flip) : prev));
+      setDetail((prev) =>
+        prev && prev.details
+          ? { ...prev, status: previousStatus, details: { ...prev.details, status: previousStatus } }
+          : prev
+      );
+      // quiet refresh of stats + counts (list already flipped optimistically)
+      quietRefreshRef.current = true;
+      void loadAll(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Reopen failed — try again");
+    } finally {
+      setSigningOff(null);
+      setReopenTarget(null);
+    }
+  }
+
   const detailResult = detail?.details ?? null;
   const isRejected = detailResult ? detailResult.status === "REJECTED" || detailResult.gate.accepted === false : false;
   const canSign =
     !!detailResult && (detailResult.status === "NEEDS_REVIEW" || detailResult.status === "URGENT") && !signedOff[openId ?? ""];
+  const isSignedOffHere = Boolean(signedOff[openId ?? ""] || detail?.reviewed_by);
   const reviewedAtText = (() => {
     const iso = detail?.reviewed_at ?? null;
     if (!iso) return signedOff[openId ?? ""]?.at ?? "";
@@ -645,7 +716,18 @@ export default function DashboardView() {
                           <TrustChip level={r.trust_level} />
                         </TableCell>
                         <TableCell className="py-3">
-                          <StatusChip status={r.status} />
+                          <span className="flex items-center gap-1.5">
+                            <StatusChip status={r.status} />
+                            {r.reviewed_by && (
+                              <span
+                                className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full border border-[#34D399]/50 bg-[#0A2E24] text-[#34D399]"
+                                title={`Signed off by ${r.reviewed_by}${r.reviewed_at ? ` · ${fmtDate(r.reviewed_at)}` : ""}`}
+                                aria-label={`Signed off by ${r.reviewed_by}`}
+                              >
+                                <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+                              </span>
+                            )}
+                          </span>
                         </TableCell>
                         <TableCell className="py-3">
                           {r.dme_risk ? (
@@ -716,6 +798,15 @@ export default function DashboardView() {
                       {r.grade || "—"}
                     </span>
                     <StatusChip status={r.status} />
+                    {r.reviewed_by && (
+                      <span
+                        className="chip border-[#34D399]/45 bg-[#0A2E24]/70 text-[#34D399]"
+                        title={`Signed off by ${r.reviewed_by}${r.reviewed_at ? ` · ${fmtDate(r.reviewed_at)}` : ""}`}
+                      >
+                        <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+                        Signed
+                      </span>
+                    )}
                     {r.dme_risk && (
                       <span className="chip border-[#F87171]/40 text-[#F87171]">
                         <TriangleAlert className="h-3 w-3" aria-hidden="true" />
@@ -917,16 +1008,28 @@ export default function DashboardView() {
                     <Download className="h-4 w-4" aria-hidden="true" />
                     Download PDF
                   </Button>
-                  {signedOff[openId] || detail?.reviewed_by ? (
-                    <span
-                      className="chip min-h-11 border-[#34D399]/40 bg-[#0A2E24]/60 text-[#34D399]"
-                      title={reviewNoteText}
-                    >
-                      <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                      Signed off · {(signedOff[openId]?.by ?? detail?.reviewed_by ?? "").split(" (")[0]}
-                      {reviewedAtText ? ` · ${reviewedAtText}` : ""}
+                  {isSignedOffHere && openId ? (
+                    <span className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <span
+                        className="chip min-h-11 border-[#34D399]/40 bg-[#0A2E24]/60 text-[#34D399]"
+                        title={reviewNoteText}
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                        Signed off · {(signedOff[openId]?.by ?? detail?.reviewed_by ?? "").split(" (")[0]}
+                        {reviewedAtText ? ` · ${reviewedAtText}` : ""}
+                      </span>
+                      <Button
+                        variant="outline"
+                        className="min-h-11 border-white/15 px-3 text-xs text-muted-foreground hover:border-[#FBBF24]/50 hover:text-[#FBBF24]"
+                        title="Clear the sign-off and return this case to the review queue"
+                        onClick={() => setReopenTarget(openId)}
+                        disabled={signingOff === openId}
+                      >
+                        <Undo2 className="h-4 w-4" aria-hidden="true" />
+                        {signingOff === openId ? "Reopening…" : "Undo"}
+                      </Button>
                     </span>
-                  ) : canSign ? (
+                  ) : canSign && openId ? (
                     <Button
                       className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B] disabled:opacity-60"
                       onClick={() => void handleSignOff(openId)}
@@ -942,6 +1045,37 @@ export default function DashboardView() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* 5 ── Reopen (undo sign-off) confirmation */}
+      <AlertDialog open={reopenTarget !== null} onOpenChange={(o) => { if (!o) setReopenTarget(null); }}>
+        <AlertDialogContent className="border-[#FBBF24]/30 bg-[#0B1526]/95 backdrop-blur-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display text-lg">Reopen {reopenTarget ?? "this case"} for review?</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-relaxed text-muted-foreground">
+              The sign-off will be cleared and the case returns to the{" "}
+              <span className="font-semibold text-[#FBBF24]">
+                {reopenTarget && signedOff[reopenTarget]?.previousStatus === "URGENT" ? "urgent" : "review"} queue
+              </span>
+              . The audit trail records the reopen — re-approve when you&apos;re ready.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-11 border-white/15 bg-transparent hover:bg-white/5 hover:text-foreground">
+              Keep sign-off
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-11 bg-[#FBBF24] font-semibold text-[#2A2210] hover:bg-[#EAB308]"
+              onClick={(e) => {
+                e.preventDefault();
+                if (reopenTarget) void handleReopen(reopenTarget);
+              }}
+            >
+              <Undo2 className="h-4 w-4" aria-hidden="true" />
+              Reopen case
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

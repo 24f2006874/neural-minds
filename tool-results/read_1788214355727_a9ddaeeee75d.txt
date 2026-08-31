@@ -1,0 +1,948 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+     4→import {
+     5→  ClipboardList,
+     6→  Crosshair,
+     7→  Download,
+     8→  FileDown,
+     9→  Info,
+    10→  RefreshCw,
+    11→  ScanEye,
+    12→  ScanLine,
+    13→  ShieldCheck,
+    14→  Timer,
+    15→  TriangleAlert,
+    16→  type LucideIcon,
+    17→} from "lucide-react";
+    18→import { toast } from "sonner";
+    19→
+    20→import { AnimatedNumber } from "@/components/drishti/animated-number";
+    21→import { GlassCard, Reveal, SectionHeading, StatusChip, TrustChip } from "@/components/drishti/primitives";
+    22→import { RetinaView } from "@/components/drishti/retina-view";
+    23→import { ConfBar, ScoreDial } from "@/components/drishti/score-dial";
+    24→import { useNav } from "@/components/drishti/shell";
+    25→import { Button } from "@/components/ui/button";
+    26→import {
+    27→  Dialog,
+    28→  DialogContent,
+    29→  DialogDescription,
+    30→  DialogFooter,
+    31→  DialogHeader,
+    32→  DialogTitle,
+    33→} from "@/components/ui/dialog";
+    34→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+    35→import { ICDR_CLASSES, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
+    36→import { downloadReportPdf } from "@/lib/report-pdf";
+    37→import { cn } from "@/lib/utils";
+    38→
+    39→// ────────────────────────────────────────────────────────────
+    40→// Types (API row shapes)
+    41→// ────────────────────────────────────────────────────────────
+    42→
+    43→interface PatientRow {
+    44→  id: string;
+    45→  patient_id: string;
+    46→  created_at: string;
+    47→  grade: string;
+    48→  class_level: number;
+    49→  confidence: number;
+    50→  trust_score: number;
+    51→  trust_level: TrustLevel;
+    52→  status: CaseStatus;
+    53→  dme_risk: boolean;
+    54→  quality_score: number;
+    55→  processing_ms: number;
+    56→  reviewed_by?: string | null;
+    57→  reviewed_at?: string | null;
+    58→}
+    59→
+    60→interface PatientDetail {
+    61→  patientId: string;
+    62→  status: CaseStatus;
+    63→  details: ScreeningResult | null;
+    64→  reviewed_by?: string | null;
+    65→  reviewed_at?: string | null;
+    66→}
+    67→
+    68→type FilterKey = "all" | "auto_cleared" | "needs_review" | "urgent" | "rejected";
+    69→
+    70→// ────────────────────────────────────────────────────────────
+    71→// Constants
+    72→// ────────────────────────────────────────────────────────────
+    73→
+    74→const FILTER_TABS: Array<{ key: FilterKey; label: string }> = [
+    75→  { key: "all", label: "All" },
+    76→  { key: "auto_cleared", label: "Auto-cleared (HIGH)" },
+    77→  { key: "needs_review", label: "Needs review (MODERATE)" },
+    78→  { key: "urgent", label: "Urgent (LOW + DME)" },
+    79→  { key: "rejected", label: "Rejected" },
+    80→];
+    81→
+    82→const LEGEND: Array<{ label: string; color: string }> = [
+    83→  { label: "Vessels", color: "#b3402e" },
+    84→  { label: "MA", color: "#e0331f" },
+    85→  { label: "HEM", color: "#9b1c1c" },
+    86→  { label: "EX", color: "#f2d66c" },
+    87→  { label: "DME", color: "#fbbf24" },
+    88→  { label: "Grad-CAM", color: "#ffb020" },
+    89→];
+    90→
+    91→const TIMING_KEYS = ["gate", "evidence", "classify", "explain", "total"] as const;
+    92→
+    93→// ────────────────────────────────────────────────────────────
+    94→// Helpers
+    95→// ────────────────────────────────────────────────────────────
+    96→
+    97→function fmtDate(iso: string): string {
+    98→  const d = new Date(iso);
+    99→  if (Number.isNaN(d.getTime())) return "—";
+   100→  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+   101→}
+   102→
+   103→function icdrColor(level: number): string | undefined {
+   104→  return ICDR_CLASSES.find((c) => c.level === level)?.color;
+   105→}
+   106→
+   107→function rowGradeColor(row: PatientRow): string | undefined {
+   108→  if (row.status === "REJECTED" || row.class_level < 0) return undefined;
+   109→  return icdrColor(row.class_level);
+   110→}
+   111→
+   112→// ────────────────────────────────────────────────────────────
+   113→// Small building blocks
+   114→// ────────────────────────────────────────────────────────────
+   115→
+   116→function StatCard({
+   117→  icon: Icon,
+   118→  label,
+   119→  sub,
+   120→  value,
+   121→  decimals = 0,
+   122→  suffix = "",
+   123→  valueClass,
+   124→  iconClass,
+   125→  loading,
+   126→}: {
+   127→  icon: LucideIcon;
+   128→  label: string;
+   129→  sub: string;
+   130→  value: number;
+   131→  decimals?: number;
+   132→  suffix?: string;
+   133→  valueClass: string;
+   134→  iconClass: string;
+   135→  loading: boolean;
+   136→}) {
+   137→  return (
+   138→    <GlassCard className="p-4 sm:p-6">
+   139→      {loading ? (
+   140→        <div className="flex items-start justify-between gap-3">
+   141→          <div className="w-full space-y-2.5">
+   142→            <div className="skeleton-shimmer h-9 w-20 rounded-md" />
+   143→            <div className="skeleton-shimmer h-3.5 w-24 rounded" />
+   144→            <div className="skeleton-shimmer h-2.5 w-28 rounded" />
+   145→          </div>
+   146→          <div className="skeleton-shimmer h-9 w-9 shrink-0 rounded-lg" />
+   147→        </div>
+   148→      ) : (
+   149→        <div className="flex items-start justify-between gap-3">
+   150→          <div className="min-w-0">
+   151→            <p className={cn("tabular font-display text-3xl font-bold leading-none tracking-tight sm:text-4xl", valueClass)}>
+   152→              <AnimatedNumber value={value} decimals={decimals} suffix={suffix} />
+   153→            </p>
+   154→            <p className="mt-2 truncate text-sm font-semibold text-foreground">{label}</p>
+   155→            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{sub}</p>
+   156→          </div>
+   157→          <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", iconClass)}>
+   158→            <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+   159→          </span>
+   160→        </div>
+   161→      )}
+   162→    </GlassCard>
+   163→  );
+   164→}
+   165→
+   166→function EmptyQueue({ onLaunch }: { onLaunch: () => void }) {
+   167→  return (
+   168→    <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+   169→      <ScanLine className="h-8 w-8 text-[#22D3EE]/60" aria-hidden="true" />
+   170→      <p className="text-sm text-muted-foreground">No cases in this queue — run a screening first</p>
+   171→      <Button
+   172→        size="sm"
+   173→        variant="outline"
+   174→        className="min-h-11 border-[#22D3EE]/40 text-[#22D3EE] hover:bg-[#22D3EE]/10 hover:text-[#22D3EE]"
+   175→        onClick={onLaunch}
+   176→      >
+   177→        <ScanLine className="h-4 w-4" aria-hidden="true" />
+   178→        Open live screening
+   179→      </Button>
+   180→    </div>
+   181→  );
+   182→}
+   183→
+   184→function QueueError({ message, onRetry }: { message: string; onRetry: () => void }) {
+   185→  return (
+   186→    <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+   187→      <TriangleAlert className="h-6 w-6 text-[#F87171]" aria-hidden="true" />
+   188→      <p className="text-sm font-medium text-foreground">Couldn&apos;t load the queue</p>
+   189→      <p className="text-xs text-muted-foreground">{message}</p>
+   190→      <Button
+   191→        size="sm"
+   192→        variant="outline"
+   193→        className="min-h-11 border-white/15 hover:border-[#F87171]/40 hover:text-[#F87171]"
+   194→        onClick={onRetry}
+   195→      >
+   196→        <RefreshCw className="h-4 w-4" aria-hidden="true" />
+   197→        Retry
+   198→      </Button>
+   199→    </div>
+   200→  );
+   201→}
+   202→
+   203→function LesionStat({ count, label, color }: { count: number; label: string; color: string }) {
+   204→  return (
+   205→    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-center">
+   206→      <AnimatedNumber value={count} className="font-display text-xl font-bold" />
+   207→      <p className="mt-0.5 flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+   208→        <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} aria-hidden="true" />
+   209→        {label}
+   210→      </p>
+   211→    </div>
+   212→  );
+   213→}
+   214→
+   215→function ModalSkeleton() {
+   216→  return (
+   217→    <div className="grid gap-6 p-6 lg:grid-cols-2">
+   218→      <div className="space-y-3">
+   219→        <div className="skeleton-shimmer aspect-square w-full rounded-xl" />
+   220→        <div className="flex flex-wrap gap-2">
+   221→          {LEGEND.map((l) => (
+   222→            <div key={l.label} className="skeleton-shimmer h-6 w-16 rounded-full" />
+   223→          ))}
+   224→        </div>
+   225→      </div>
+   226→      <div className="space-y-4">
+   227→        <div className="skeleton-shimmer h-32 w-full rounded-xl" />
+   228→        <div className="skeleton-shimmer h-20 w-full rounded-xl" />
+   229→        <div className="grid grid-cols-3 gap-2">
+   230→          <div className="skeleton-shimmer h-20 rounded-lg" />
+   231→          <div className="skeleton-shimmer h-20 rounded-lg" />
+   232→          <div className="skeleton-shimmer h-20 rounded-lg" />
+   233→        </div>
+   234→        <div className="skeleton-shimmer h-24 w-full rounded-xl" />
+   235→      </div>
+   236→    </div>
+   237→  );
+   238→}
+   239→
+   240→// ────────────────────────────────────────────────────────────
+   241→// Main view
+   242→// ────────────────────────────────────────────────────────────
+   243→
+   244→export default function DashboardView() {
+   245→  const { navigate } = useNav();
+   246→
+   247→  // full dataset (stats + tab counts)
+   248→  const [allRows, setAllRows] = useState<PatientRow[] | null>(null);
+   249→  const [allLoading, setAllLoading] = useState(true);
+   250→  const [allError, setAllError] = useState<string | null>(null);
+   251→
+   252→  // current filter queue
+   253→  const [filter, setFilter] = useState<FilterKey>("all");
+   254→  const [rows, setRows] = useState<PatientRow[] | null>(null);
+   255→  const [rowsLoading, setRowsLoading] = useState(true);
+   256→  const [rowsError, setRowsError] = useState<string | null>(null);
+   257→
+   258→  // report modal
+   259→  const [openId, setOpenId] = useState<string | null>(null);
+   260→  const [detail, setDetail] = useState<PatientDetail | null>(null);
+   261→  const [detailLoading, setDetailLoading] = useState(false);
+   262→  const [detailError, setDetailError] = useState<string | null>(null);
+   263→  const [detailNonce, setDetailNonce] = useState(0);
+   264→
+   265→  // sign-off audit trail: patientId → who/when (persisted server-side via PATCH)
+   266→  const signedOffRef = useRef<Record<string, boolean>>({});
+   267→  const [signedOff, setSignedOff] = useState<Record<string, { by: string; at: string }>>({});
+   268→  const [signingOff, setSigningOff] = useState<string | null>(null);
+   269→  const quietRefreshRef = useRef(false);
+   270→
+   271→  const applyOverrides = useCallback(
+   272→    (list: PatientRow[]): PatientRow[] =>
+   273→      list.map((r) => (signedOffRef.current[r.patient_id] ? { ...r, status: "AUTO_CLEARED" as CaseStatus } : r)),
+   274→    []
+   275→  );
+   276→
+   277→  const loadAll = useCallback(
+   278→    async (silent = false) => {
+   279→      if (!silent) setAllLoading(true);
+   280→      setAllError(null);
+   281→      try {
+   282→        const res = await fetch("/api/patients");
+   283→        if (!res.ok) throw new Error(`API returned ${res.status}`);
+   284→        const data = (await res.json()) as { patients: PatientRow[] };
+   285→        setAllRows(applyOverrides(data.patients ?? []));
+   286→      } catch (e) {
+   287→        quietRefreshRef.current = false;
+   288→        setAllError(e instanceof Error ? e.message : "Failed to load cases");
+   289→      } finally {
+   290→        setAllLoading(false);
+   291→      }
+   292→    },
+   293→    [applyOverrides]
+   294→  );
+   295→
+   296→  useEffect(() => {
+   297→    void loadAll();
+   298→  }, [loadAll]);
+   299→
+   300→  // queue rows follow the active filter; "all" reuses the already-loaded list
+   301→  useEffect(() => {
+   302→    if (filter === "all" && allRows) {
+   303→      setRows(allRows);
+   304→      setRowsLoading(false);
+   305→      setRowsError(null);
+   306→      return;
+   307→    }
+   308→    const quiet = quietRefreshRef.current;
+   309→    quietRefreshRef.current = false;
+   310→    let cancelled = false;
+   311→    if (!quiet) setRowsLoading(true);
+   312→    setRowsError(null);
+   313→    fetch(`/api/patients?filter=${filter}`)
+   314→      .then(async (res) => {
+   315→        if (!res.ok) throw new Error(`API returned ${res.status}`);
+   316→        return (await res.json()) as { patients: PatientRow[] };
+   317→      })
+   318→      .then((d) => {
+   319→        if (!cancelled) setRows(applyOverrides(d.patients ?? []));
+   320→      })
+   321→      .catch((e) => {
+   322→        if (!cancelled) setRowsError(e instanceof Error ? e.message : "Failed to load queue");
+   323→      })
+   324→      .finally(() => {
+   325→        if (!cancelled && !quiet) setRowsLoading(false);
+   326→        if (quiet) setRowsLoading(false);
+   327→      });
+   328→    return () => {
+   329→      cancelled = true;
+   330→    };
+   331→  }, [filter, allRows, applyOverrides]);
+   332→
+   333→  // report detail fetch on modal open / retry
+   334→  useEffect(() => {
+   335→    if (!openId) return;
+   336→    let cancelled = false;
+   337→    setDetailLoading(true);
+   338→    setDetailError(null);
+   339→    setDetail(null);
+   340→    fetch(`/api/patients/${encodeURIComponent(openId)}`)
+   341→      .then(async (res) => {
+   342→        if (!res.ok) throw new Error(`API returned ${res.status}`);
+   343→        return (await res.json()) as PatientDetail;
+   344→      })
+   345→      .then((d) => {
+   346→        if (cancelled) return;
+   347→        if (signedOffRef.current[openId] && d.details) {
+   348→          setDetail({ ...d, status: "AUTO_CLEARED", details: { ...d.details, status: "AUTO_CLEARED" } });
+   349→        } else {
+   350→          setDetail(d);
+   351→        }
+   352→      })
+   353→      .catch((e) => {
+   354→        if (!cancelled) setDetailError(e instanceof Error ? e.message : "Failed to load report");
+   355→      })
+   356→      .finally(() => {
+   357→        if (!cancelled) setDetailLoading(false);
+   358→      });
+   359→    return () => {
+   360→      cancelled = true;
+   361→    };
+   362→  }, [openId, detailNonce]);
+   363→
+   364→  const stats = useMemo(() => {
+   365→    const list = allRows ?? [];
+   366→    const today = new Date().toDateString();
+   367→    const screenedToday = list.filter((r) => new Date(r.created_at).toDateString() === today).length;
+   368→    const referable = list.filter((r) => r.class_level >= 2 && r.status !== "REJECTED").length;
+   369→    const urgentCount = list.filter((r) => r.status === "URGENT").length;
+   370→    const queue = list.filter((r) => r.status === "NEEDS_REVIEW" || r.status === "URGENT").length;
+   371→    const avgMs = list.length ? list.reduce((a, r) => a + r.processing_ms, 0) / list.length : 0;
+   372→    return { screenedToday, referable, urgentCount, queue, avgSec: avgMs / 1000 };
+   373→  }, [allRows]);
+   374→
+   375→  const counts = useMemo(() => {
+   376→    const list = allRows ?? [];
+   377→    const c: Record<FilterKey, number> = { all: list.length, auto_cleared: 0, needs_review: 0, urgent: 0, rejected: 0 };
+   378→    for (const r of list) {
+   379→      if (r.status === "AUTO_CLEARED") c.auto_cleared++;
+   380→      else if (r.status === "NEEDS_REVIEW") c.needs_review++;
+   381→      else if (r.status === "URGENT") c.urgent++;
+   382→      else if (r.status === "REJECTED") c.rejected++;
+   383→    }
+   384→    return c;
+   385→  }, [allRows]);
+   386→
+   387→  const openReport = useCallback((patientId: string) => {
+   388→    setOpenId(patientId);
+   389→    setDetailNonce((n) => n + 1);
+   390→  }, []);
+   391→
+   392→  async function handleSignOff(patientId: string) {
+   393→    if (signingOff) return;
+   394→    setSigningOff(patientId);
+   395→    try {
+   396→      const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}/status`, {
+   397→        method: "PATCH",
+   398→        headers: { "Content-Type": "application/json" },
+   399→        body: JSON.stringify({ status: "AUTO_CLEARED", reviewed_by: "Dr. Review (dashboard demo)" }),
+   400→      });
+   401→      if (!res.ok) {
+   402→        const err = (await res.json().catch(() => ({}))) as { error?: string };
+   403→        throw new Error(err.error ?? `API returned ${res.status}`);
+   404→      }
+   405→      const data = (await res.json()) as { reviewed_by: string; reviewed_at: string };
+   406→      const at = data.reviewed_at ? new Date(data.reviewed_at).toLocaleString() : new Date().toLocaleString();
+   407→      toast.success(`Signed off by ${data.reviewed_by} — saved to the register`);
+   408→      signedOffRef.current = { ...signedOffRef.current, [patientId]: true };
+   409→      setSignedOff((s) => ({ ...s, [patientId]: { by: data.reviewed_by, at } }));
+   410→      const flip = (r: PatientRow): PatientRow =>
+   411→        r.patient_id === patientId
+   412→          ? { ...r, status: "AUTO_CLEARED", reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at }
+   413→          : r;
+   414→      setAllRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
+   415→      setRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
+   416→      setDetail((prev) =>
+   417→        prev && prev.details
+   418→          ? { ...prev, status: "AUTO_CLEARED", details: { ...prev.details, status: "AUTO_CLEARED" } }
+   419→          : prev
+   420→      );
+   421→      // quiet refresh of stats + counts (list already flipped optimistically)
+   422→      quietRefreshRef.current = true;
+   423→      void loadAll(true);
+   424→    } catch (e) {
+   425→      toast.error(e instanceof Error ? e.message : "Sign-off failed — try again");
+   426→    } finally {
+   427→      setSigningOff(null);
+   428→    }
+   429→  }
+   430→
+   431→  const detailResult = detail?.details ?? null;
+   432→  const isRejected = detailResult ? detailResult.status === "REJECTED" || detailResult.gate.accepted === false : false;
+   433→  const canSign =
+   434→    !!detailResult && (detailResult.status === "NEEDS_REVIEW" || detailResult.status === "URGENT") && !signedOff[openId ?? ""];
+   435→  const reviewedAtText = (() => {
+   436→    const iso = detail?.reviewed_at ?? null;
+   437→    if (!iso) return signedOff[openId ?? ""]?.at ?? "";
+   438→    try {
+   439→      return new Date(iso).toLocaleString();
+   440→    } catch {
+   441→      return "";
+   442→    }
+   443→  })();
+   444→  const reviewNoteText = detail?.reviewed_by
+   445→    ? `Audit trail: signed off by ${detail.reviewed_by}${reviewedAtText ? ` at ${reviewedAtText}` : ""} — persisted in the screening register`
+   446→    : "Audit trail: signed off — persisted in the screening register";
+   447→
+   448→  return (
+   449→    <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+   450→      <SectionHeading
+   451→        eyebrow="HUMAN-IN-THE-LOOP"
+   452→        title={
+   453→          <>
+   454→            Doctor Dashboard — <span className="text-glow-cyan">Review Queue</span>
+   455→          </>
+   456→        }
+   457→        sub="HIGH-trust cases auto-clear. MODERATE cases wait for your sign-off. Urgent and DME cases jump the queue."
+   458→      />
+   459→      <Reveal className="-mt-4 mb-10 flex justify-center">
+   460→        <span className="chip border-[#FBBF24]/40 bg-[#2A2210]/60 text-[#FBBF24]">
+   461→          <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+   462→          Demo data — simulated screening records
+   463→        </span>
+   464→      </Reveal>
+   465→
+   466→      {/* 1 ── Stats cards */}
+   467→      <Reveal delay={0.05}>
+   468→        {allError ? (
+   469→          <GlassCard className="border-[#F87171]/30 p-4 sm:p-6">
+   470→            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   471→              <div className="flex items-center gap-3">
+   472→                <TriangleAlert className="h-5 w-5 shrink-0 text-[#F87171]" aria-hidden="true" />
+   473→                <div>
+   474→                  <p className="text-sm font-semibold text-foreground">Couldn&apos;t load dashboard stats</p>
+   475→                  <p className="text-xs text-muted-foreground">{allError}</p>
+   476→                </div>
+   477→              </div>
+   478→              <Button
+   479→                size="sm"
+   480→                variant="outline"
+   481→                className="min-h-11 shrink-0 border-[#F87171]/40 text-[#F87171] hover:bg-[#F87171]/10 hover:text-[#F87171]"
+   482→                onClick={() => void loadAll()}
+   483→              >
+   484→                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+   485→                Retry
+   486→              </Button>
+   487→            </div>
+   488→          </GlassCard>
+   489→        ) : (
+   490→          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+   491→            <StatCard
+   492→              icon={ScanEye}
+   493→              label="Screened today"
+   494→              sub="cases through the DRISHTI pipeline today"
+   495→              value={stats.screenedToday}
+   496→              valueClass="text-[#22D3EE]"
+   497→              iconClass="border-[#22D3EE]/30 bg-[#22D3EE]/10 text-[#22D3EE]"
+   498→              loading={allLoading}
+   499→            />
+   500→            <StatCard
+   501→              icon={Crosshair}
+   502→              label="Referable caught"
+   503→              sub="grade ≥ Moderate NPDR · refer within 3-6 months"
+   504→              value={stats.referable}
+   505→              valueClass="text-[#FBBF24]"
+   506→              iconClass="border-[#FBBF24]/30 bg-[#FBBF24]/10 text-[#FBBF24]"
+   507→              loading={allLoading}
+   508→            />
+   509→            <StatCard
+   510→              icon={ClipboardList}
+   511→              label="Review queue"
+   512→              sub="MODERATE + URGENT awaiting doctor sign-off"
+   513→              value={stats.queue}
+   514→              valueClass={stats.urgentCount > 0 ? "text-[#F87171]" : "text-[#FBBF24]"}
+   515→              iconClass={
+   516→                stats.urgentCount > 0
+   517→                  ? "border-[#F87171]/30 bg-[#F87171]/10 text-[#F87171]"
+   518→                  : "border-[#FBBF24]/30 bg-[#FBBF24]/10 text-[#FBBF24]"
+   519→              }
+   520→              loading={allLoading}
+   521→            />
+   522→            <StatCard
+   523→              icon={Timer}
+   524→              label="Avg processing time"
+   525→              sub="gate → evidence → CNN → Grad-CAM → trust"
+   526→              value={stats.avgSec}
+   527→              decimals={1}
+   528→              suffix="s"
+   529→              valueClass="text-[#34D399]"
+   530→              iconClass="border-[#34D399]/30 bg-[#34D399]/10 text-[#34D399]"
+   531→              loading={allLoading}
+   532→            />
+   533→          </div>
+   534→        )}
+   535→      </Reveal>
+   536→
+   537→      {/* 2 ── Filter tabs + register export */}
+   538→      <Reveal delay={0.1} className="mt-8">
+   539→        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   540→          <div className="drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
+   541→          {FILTER_TABS.map((t) => {
+   542→            const active = filter === t.key;
+   543→            return (
+   544→              <button
+   545→                key={t.key}
+   546→                type="button"
+   547→                role="tab"
+   548→                aria-selected={active}
+   549→                onClick={() => setFilter(t.key)}
+   550→                className={cn(
+   551→                  "flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium transition-all duration-200 sm:text-sm",
+   552→                  active
+   553→                    ? "border-[#22D3EE]/40 bg-[#22D3EE]/15 text-[#22D3EE]"
+   554→                    : "border-white/10 bg-white/[0.03] text-muted-foreground hover:border-white/20 hover:text-foreground"
+   555→                )}
+   556→              >
+   557→                {t.label}
+   558→                <span
+   559→                  className={cn(
+   560→                    "tabular rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+   561→                    active ? "bg-[#22D3EE]/20 text-[#22D3EE]" : "bg-white/5 text-muted-foreground"
+   562→                  )}
+   563→                >
+   564→                  {allRows ? counts[t.key] : "·"}
+   565→                </span>
+   566→              </button>
+   567→            );
+   568→          })}
+   569→          </div>
+   570→          <a
+   571→            href={`/api/patients/export?filter=${filter}`}
+   572→            download
+   573→            className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+   574→            title="Download the current queue as a CSV register"
+   575→          >
+   576→            <FileDown className="h-4 w-4" aria-hidden="true" />
+   577→            Export CSV
+   578→          </a>
+   579→        </div>
+   580→      </Reveal>
+   581→
+   582→      {/* 3 ── Patient table (desktop) */}
+   583→      <Reveal delay={0.15} className="mt-4 hidden md:block">
+   584→        <GlassCard className="p-0">
+   585→          {rowsError ? (
+   586→            <QueueError message={rowsError} onRetry={() => void loadAll()} />
+   587→          ) : rowsLoading || !rows ? (
+   588→            <div className="space-y-3 p-6">
+   589→              {Array.from({ length: 6 }).map((_, i) => (
+   590→                <div key={i} className="skeleton-shimmer h-10 w-full rounded-lg" />
+   591→              ))}
+   592→            </div>
+   593→          ) : rows.length === 0 ? (
+   594→            <EmptyQueue onLaunch={() => navigate("screening")} />
+   595→          ) : (
+   596→            <div className="drishti-scroll max-h-[480px] overflow-y-auto">
+   597→              <Table>
+   598→                <TableHeader className="sticky top-0 z-10 bg-[#0A1628]/95 backdrop-blur">
+   599→                  <TableRow className="border-white/10 hover:bg-transparent">
+   600→                    <TableHead className="text-xs uppercase tracking-wider">Patient ID</TableHead>
+   601→                    <TableHead className="text-xs uppercase tracking-wider">Date</TableHead>
+   602→                    <TableHead className="text-xs uppercase tracking-wider">Grade</TableHead>
+   603→                    <TableHead className="text-xs uppercase tracking-wider">Confidence</TableHead>
+   604→                    <TableHead className="text-xs uppercase tracking-wider">Trust</TableHead>
+   605→                    <TableHead className="text-xs uppercase tracking-wider">Status</TableHead>
+   606→                    <TableHead className="text-xs uppercase tracking-wider">DME</TableHead>
+   607→                    <TableHead className="text-right text-xs uppercase tracking-wider">Time</TableHead>
+   608→                  </TableRow>
+   609→                </TableHeader>
+   610→                <TableBody>
+   611→                  {rows.map((r) => {
+   612→                    const gColor = rowGradeColor(r);
+   613→                    return (
+   614→                      <TableRow
+   615→                        key={r.id}
+   616→                        tabIndex={0}
+   617→                        aria-label={`Open report for ${r.patient_id}`}
+   618→                        onClick={() => openReport(r.patient_id)}
+   619→                        onKeyDown={(e) => {
+   620→                          if (e.key === "Enter" || e.key === " ") {
+   621→                            e.preventDefault();
+   622→                            openReport(r.patient_id);
+   623→                          }
+   624→                        }}
+   625→                        className="cursor-pointer border-white/5 hover:bg-white/[0.03] focus-visible:bg-white/[0.05] focus-visible:outline-none"
+   626→                      >
+   627→                        <TableCell className="py-3">
+   628→                          <span className="font-display font-semibold text-foreground">{r.patient_id}</span>
+   629→                        </TableCell>
+   630→                        <TableCell className="py-3">
+   631→                          <span className="tabular text-xs text-muted-foreground">{fmtDate(r.created_at)}</span>
+   632→                        </TableCell>
+   633→                        <TableCell className="py-3">
+   634→                          <span
+   635→                            className={cn("text-sm font-medium", !gColor && "text-muted-foreground")}
+   636→                            style={gColor ? { color: gColor } : undefined}
+   637→                          >
+   638→                            {r.grade || "—"}
+   639→                          </span>
+   640→                        </TableCell>
+   641→                        <TableCell className="py-3">
+   642→                          <span className="tabular text-sm text-foreground/90">{(r.confidence * 100).toFixed(1)}%</span>
+   643→                        </TableCell>
+   644→                        <TableCell className="py-3">
+   645→                          <TrustChip level={r.trust_level} />
+   646→                        </TableCell>
+   647→                        <TableCell className="py-3">
+   648→                          <StatusChip status={r.status} />
+   649→                        </TableCell>
+   650→                        <TableCell className="py-3">
+   651→                          {r.dme_risk ? (
+   652→                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#F87171]">
+   653→                              <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+   654→                              DME
+   655→                            </span>
+   656→                          ) : (
+   657→                            <span className="text-muted-foreground">—</span>
+   658→                          )}
+   659→                        </TableCell>
+   660→                        <TableCell className="py-3 text-right">
+   661→                          <span className="tabular text-xs text-muted-foreground">{(r.processing_ms / 1000).toFixed(1)}s</span>
+   662→                        </TableCell>
+   663→                      </TableRow>
+   664→                    );
+   665→                  })}
+   666→                </TableBody>
+   667→              </Table>
+   668→            </div>
+   669→          )}
+   670→        </GlassCard>
+   671→      </Reveal>
+   672→
+   673→      {/* 3b ── Mobile cards */}
+   674→      <div className="mt-4 grid gap-3 md:hidden">
+   675→        {rowsError ? (
+   676→          <GlassCard className="p-0">
+   677→            <QueueError message={rowsError} onRetry={() => void loadAll()} />
+   678→          </GlassCard>
+   679→        ) : rowsLoading || !rows ? (
+   680→          Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton-shimmer h-28 w-full rounded-xl" />)
+   681→        ) : rows.length === 0 ? (
+   682→          <GlassCard className="p-0">
+   683→            <EmptyQueue onLaunch={() => navigate("screening")} />
+   684→          </GlassCard>
+   685→        ) : (
+   686→          rows.map((r) => {
+   687→            const gColor = rowGradeColor(r);
+   688→            return (
+   689→              <GlassCard
+   690→                key={r.id}
+   691→                hover
+   692→                className="glass-card-hover cursor-pointer p-4"
+   693→              >
+   694→                <button
+   695→                  type="button"
+   696→                  className="w-full text-left"
+   697→                  aria-label={`Open report for ${r.patient_id}`}
+   698→                  onClick={() => openReport(r.patient_id)}
+   699→                >
+   700→                  <div className="flex items-start justify-between gap-2">
+   701→                    <div className="min-w-0">
+   702→                      <p className="font-display font-semibold text-foreground">{r.patient_id}</p>
+   703→                      <p className="tabular mt-0.5 text-xs text-muted-foreground">{fmtDate(r.created_at)}</p>
+   704→                    </div>
+   705→                    <TrustChip level={r.trust_level} />
+   706→                  </div>
+   707→                  <div className="mt-3 flex flex-wrap items-center gap-2">
+   708→                    <span
+   709→                      className={cn(
+   710→                        "chip",
+   711→                        !gColor && "border-white/25 text-muted-foreground"
+   712→                      )}
+   713→                      style={gColor ? { borderColor: `${gColor}55`, color: gColor } : undefined}
+   714→                    >
+   715→                      {gColor && <span className="h-1.5 w-1.5 rounded-full" style={{ background: gColor }} aria-hidden="true" />}
+   716→                      {r.grade || "—"}
+   717→                    </span>
+   718→                    <StatusChip status={r.status} />
+   719→                    {r.dme_risk && (
+   720→                      <span className="chip border-[#F87171]/40 text-[#F87171]">
+   721→                        <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+   722→                        DME
+   723→                      </span>
+   724→                    )}
+   725→                  </div>
+   726→                  <div className="tabular mt-2.5 flex gap-4 text-xs text-muted-foreground">
+   727→                    <span>Conf {(r.confidence * 100).toFixed(1)}%</span>
+   728→                    <span>{(r.processing_ms / 1000).toFixed(1)}s</span>
+   729→                  </div>
+   730→                </button>
+   731→              </GlassCard>
+   732→            );
+   733→          })
+   734→        )}
+   735→      </div>
+   736→
+   737→      {/* 4 ── Report modal */}
+   738→      <Dialog open={openId !== null} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
+   739→        <DialogContent
+   740→          aria-describedby={undefined}
+   741→          className={cn(
+   742→            "max-h-[85vh] max-w-4xl gap-0 overflow-y-auto overflow-x-hidden border-[#22D3EE]/25 bg-[#0B1526]/95 p-0 backdrop-blur-xl sm:max-w-4xl drishti-scroll"
+   743→          )}
+   744→        >
+   745→          {detailLoading && <ModalSkeleton />}
+   746→
+   747→          {!detailLoading && detailError && (
+   748→            <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+   749→              <TriangleAlert className="h-6 w-6 text-[#F87171]" aria-hidden="true" />
+   750→              <p className="text-sm font-medium text-foreground">Couldn&apos;t load the report</p>
+   751→              <p className="text-xs text-muted-foreground">{detailError}</p>
+   752→              <Button
+   753→                size="sm"
+   754→                variant="outline"
+   755→                className="min-h-11 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+   756→                onClick={() => setDetailNonce((n) => n + 1)}
+   757→              >
+   758→                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+   759→                Retry
+   760→              </Button>
+   761→            </div>
+   762→          )}
+   763→
+   764→          {!detailLoading && !detailError && detailResult && openId && (
+   765→            <>
+   766→              <div className="px-6 pt-6">
+   767→                <DialogHeader>
+   768→                  <DialogTitle className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-display text-xl">
+   769→                    <span>{detailResult.patient_id}</span>
+   770→                    {(() => {
+   771→                      const gc =
+   772→                        detailResult.status === "REJECTED" || detailResult.classification.class_level < 0
+   773→                          ? undefined
+   774→                          : icdrColor(detailResult.classification.class_level);
+   775→                      return (
+   776→                        <span
+   777→                          className={cn("text-sm font-semibold", !gc && "text-muted-foreground")}
+   778→                          style={gc ? { color: gc } : undefined}
+   779→                        >
+   780→                          {detailResult.classification.predicted_class || "—"}
+   781→                        </span>
+   782→                      );
+   783→                    })()}
+   784→                  </DialogTitle>
+   785→                  <DialogDescription className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+   786→                    <span className="tabular">Screened {fmtDate(detailResult.created_at)}</span>
+   787→                    <span aria-hidden="true">·</span>
+   788→                    <StatusChip status={detailResult.status} />
+   789→                    <TrustChip level={detailResult.trust.trust_level} />
+   790→                  </DialogDescription>
+   791→                </DialogHeader>
+   792→              </div>
+   793→
+   794→              <div className="grid gap-6 p-6 lg:grid-cols-2">
+   795→                {/* LEFT — retina + evidence overlay */}
+   796→                <div className="space-y-3">
+   797→                  <div className="overflow-hidden rounded-xl border border-[#22D3EE]/20">
+   798→                    <RetinaView
+   799→                      severity={
+   800→                        isRejected ? 0 : Math.max(0, Math.min(4, detailResult.classification.class_level))
+   801→                      }
+   802→                      dmeRisk={detailResult.evidence.dme_risk}
+   803→                      lesions={detailResult.evidence.lesions}
+   804→                      gradcam={detailResult.evidence.gradcam}
+   805→                      layers={{ vessels: true, ma: true, hem: true, ex: true, dme: true, gradcam: true }}
+   806→                      rejected={isRejected}
+   807→                      className="aspect-square w-full"
+   808→                    />
+   809→                  </div>
+   810→                  <div className="flex flex-wrap gap-1.5" aria-label="Evidence overlay legend">
+   811→                    {LEGEND.map((l) => (
+   812→                      <span
+   813→                        key={l.label}
+   814→                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+   815→                      >
+   816→                        <span className="h-2 w-2 rounded-full" style={{ background: l.color }} aria-hidden="true" />
+   817→                        {l.label}
+   818→                      </span>
+   819→                    ))}
+   820→                  </div>
+   821→                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+   822→                    Grad-CAM highlights the regions that drove the CNN decision — the model attends to lesions, not
+   823→                    artifacts.
+   824→                  </p>
+   825→                </div>
+   826→
+   827→                {/* RIGHT — trust breakdown */}
+   828→                <div className="space-y-5">
+   829→                  <div className="flex items-center gap-5">
+   830→                    <ScoreDial
+   831→                      value={detailResult.trust.trust_score}
+   832→                      size={128}
+   833→                      label="Trust"
+   834→                      sublabel={detailResult.trust.trust_level}
+   835→                    />
+   836→                    <div className="min-w-0 space-y-2">
+   837→                      <TrustChip level={detailResult.trust.trust_level} />
+   838→                      <p className="text-sm leading-snug text-muted-foreground">{detailResult.trust.route}</p>
+   839→                    </div>
+   840→                  </div>
+   841→
+   842→                  <div className="flex items-center justify-around rounded-xl border border-white/10 bg-white/[0.02] p-4">
+   843→                    <ScoreDial value={detailResult.gate.quality_score} size={90} label="Quality" />
+   844→                    <ScoreDial value={detailResult.explainability.consistency} size={90} label="Consistency" />
+   845→                  </div>
+   846→
+   847→                  <div className="grid grid-cols-3 gap-2">
+   848→                    <LesionStat count={detailResult.evidence.ma_count} label="MA" color="#e0331f" />
+   849→                    <LesionStat count={detailResult.evidence.hem_count} label="HEM" color="#9b1c1c" />
+   850→                    <LesionStat count={detailResult.evidence.ex_count} label="EX" color="#f2d66c" />
+   851→                  </div>
+   852→
+   853→                  {!isRejected ? (
+   854→                    <div className="space-y-2.5">
+   855→                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   856→                        Class probabilities — top 3
+   857→                      </p>
+   858→                      {Object.entries(detailResult.classification.probabilities)
+   859→                        .sort((a, b) => b[1] - a[1])
+   860→                        .slice(0, 3)
+   861→                        .map(([label, value], i) => (
+   862→                          <ConfBar
+   863→                            key={label}
+   864→                            label={label}
+   865→                            value={value}
+   866→                            color={icdrColor(ICDR_CLASSES.find((c) => c.short === label)?.level ?? -1) ?? "#22D3EE"}
+   867→                            active={label === detailResult.classification.predicted_class}
+   868→                            delay={i * 90}
+   869→                          />
+   870→                        ))}
+   871→                    </div>
+   872→                  ) : (
+   873→                    <div className="flex items-start gap-2 rounded-lg border border-[#F87171]/40 bg-[#2E0F12]/70 p-3">
+   874→                      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#F87171]" aria-hidden="true" />
+   875→                      <div>
+   876→                        <p className="text-sm font-semibold text-[#F87171]">Image failed the quality gate</p>
+   877→                        <p className="text-xs text-[#F8A5A5]/80">{detailResult.gate.message}</p>
+   878→                      </div>
+   879→                    </div>
+   880→                  )}
+   881→
+   882→                  {detailResult.evidence.dme_risk && !isRejected && (
+   883→                    <div className="flex items-start gap-2 rounded-lg border border-[#F87171]/40 bg-[#2E0F12]/70 p-3">
+   884→                      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#F87171]" aria-hidden="true" />
+   885→                      <div>
+   886→                        <p className="text-sm font-semibold text-[#F87171]">DME risk flagged</p>
+   887→                        <p className="text-xs text-[#F8A5A5]/80">{detailResult.evidence.dme_message}</p>
+   888→                      </div>
+   889→                    </div>
+   890→                  )}
+   891→
+   892→                  <div className="flex flex-wrap gap-1.5">
+   893→                    {TIMING_KEYS.map((k) => (
+   894→                      <span
+   895→                        key={k}
+   896→                        className="chip border-white/10 bg-white/[0.03] text-muted-foreground"
+   897→                      >
+   898→                        {k}
+   899→                        <span className="tabular">{detailResult.timings_ms[k]}ms</span>
+   900→                      </span>
+   901→                    ))}
+   902→                  </div>
+   903→                </div>
+   904→              </div>
+   905→
+   906→              <DialogFooter className="flex-col gap-3 border-t border-white/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+   907→                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+   908→                  <Info className="h-3.5 w-3.5" aria-hidden="true" />
+   909→                  Demo data — simulated case
+   910→                </p>
+   911→                <div className="flex flex-col gap-2 sm:flex-row">
+   912→                  <Button
+   913→                    variant="outline"
+   914→                    className="min-h-11 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+   915→                    onClick={() => downloadReportPdf(detailResult)}
+   916→                  >
+   917→                    <Download className="h-4 w-4" aria-hidden="true" />
+   918→                    Download PDF
+   919→                  </Button>
+   920→                  {signedOff[openId] || detail?.reviewed_by ? (
+   921→                    <span
+   922→                      className="chip min-h-11 border-[#34D399]/40 bg-[#0A2E24]/60 text-[#34D399]"
+   923→                      title={reviewNoteText}
+   924→                    >
+   925→                      <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+   926→                      Signed off · {(signedOff[openId]?.by ?? detail?.reviewed_by ?? "").split(" (")[0]}
+   927→                      {reviewedAtText ? ` · ${reviewedAtText}` : ""}
+   928→                    </span>
+   929→                  ) : canSign ? (
+   930→                    <Button
+   931→                      className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B] disabled:opacity-60"
+   932→                      onClick={() => void handleSignOff(openId)}
+   933→                      disabled={signingOff === openId}
+   934→                    >
+   935→                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+   936→                      {signingOff === openId ? "Signing off…" : "Approve & sign-off"}
+   937→                    </Button>
+   938→                  ) : null}
+   939→                </div>
+   940→              </DialogFooter>
+   941→            </>
+   942→          )}
+   943→        </DialogContent>
+   944→      </Dialog>
+   945→    </section>
+   946→  );
+   947→}
+   948→

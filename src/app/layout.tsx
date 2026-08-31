@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
+import PwaBridge from "@/components/drishti/pwa";
 
 export const metadata: Metadata = {
   title: "DRISHTI — Trust-Gated DR Screening",
@@ -17,7 +18,13 @@ export const metadata: Metadata = {
     "MathWorks",
   ],
   authors: [{ name: "Team Neural Minds" }],
-  icons: { icon: "/logo.svg" },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "DRISHTI",
+  },
+  icons: { icon: "/logo.svg", apple: "/icons/apple-touch-icon.png" },
   openGraph: {
     title: "DRISHTI — AI that knows when to trust itself",
     description: "Trust-gated DR screening. 92.8% sensitivity · 94.5% specificity · QWK 0.899.",
@@ -51,6 +58,7 @@ export default function RootLayout({
       <body className="antialiased bg-background text-foreground">
         {children}
         <Toaster position="bottom-right" richColors theme="dark" />
+        <PwaBridge />
       </body>
     </html>
   );
