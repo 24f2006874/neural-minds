@@ -1,0 +1,891 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ClipboardList,
+  Crosshair,
+  Download,
+  Info,
+  RefreshCw,
+  ScanEye,
+  ScanLine,
+  ShieldCheck,
+  Timer,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { AnimatedNumber } from "@/components/drishti/animated-number";
+import { GlassCard, Reveal, SectionHeading, StatusChip, TrustChip } from "@/components/drishti/primitives";
+import { RetinaView } from "@/components/drishti/retina-view";
+import { ConfBar, ScoreDial } from "@/components/drishti/score-dial";
+import { useNav } from "@/components/drishti/shell";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ICDR_CLASSES, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
+import { downloadReportPdf } from "@/lib/report-pdf";
+import { cn } from "@/lib/utils";
+
+// ────────────────────────────────────────────────────────────
+// Types (API row shapes)
+// ────────────────────────────────────────────────────────────
+
+interface PatientRow {
+  id: string;
+  patient_id: string;
+  created_at: string;
+  grade: string;
+  class_level: number;
+  confidence: number;
+  trust_score: number;
+  trust_level: TrustLevel;
+  status: CaseStatus;
+  dme_risk: boolean;
+  quality_score: number;
+  processing_ms: number;
+}
+
+interface PatientDetail {
+  patientId: string;
+  status: CaseStatus;
+  details: ScreeningResult | null;
+}
+
+type FilterKey = "all" | "auto_cleared" | "needs_review" | "urgent" | "rejected";
+
+// ────────────────────────────────────────────────────────────
+// Constants
+// ────────────────────────────────────────────────────────────
+
+const FILTER_TABS: Array<{ key: FilterKey; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "auto_cleared", label: "Auto-cleared (HIGH)" },
+  { key: "needs_review", label: "Needs review (MODERATE)" },
+  { key: "urgent", label: "Urgent (LOW + DME)" },
+  { key: "rejected", label: "Rejected" },
+];
+
+const LEGEND: Array<{ label: string; color: string }> = [
+  { label: "Vessels", color: "#b3402e" },
+  { label: "MA", color: "#e0331f" },
+  { label: "HEM", color: "#9b1c1c" },
+  { label: "EX", color: "#f2d66c" },
+  { label: "DME", color: "#fbbf24" },
+  { label: "Grad-CAM", color: "#ffb020" },
+];
+
+const TIMING_KEYS = ["gate", "evidence", "classify", "explain", "total"] as const;
+
+// ────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────
+
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function icdrColor(level: number): string | undefined {
+  return ICDR_CLASSES.find((c) => c.level === level)?.color;
+}
+
+function rowGradeColor(row: PatientRow): string | undefined {
+  if (row.status === "REJECTED" || row.class_level < 0) return undefined;
+  return icdrColor(row.class_level);
+}
+
+// ────────────────────────────────────────────────────────────
+// Small building blocks
+// ────────────────────────────────────────────────────────────
+
+function StatCard({
+  icon: Icon,
+  label,
+  sub,
+  value,
+  decimals = 0,
+  suffix = "",
+  valueClass,
+  iconClass,
+  loading,
+}: {
+  icon: LucideIcon;
+  label: string;
+  sub: string;
+  value: number;
+  decimals?: number;
+  suffix?: string;
+  valueClass: string;
+  iconClass: string;
+  loading: boolean;
+}) {
+  return (
+    <GlassCard className="p-4 sm:p-6">
+      {loading ? (
+        <div className="flex items-start justify-between gap-3">
+          <div className="w-full space-y-2.5">
+            <div className="skeleton-shimmer h-9 w-20 rounded-md" />
+            <div className="skeleton-shimmer h-3.5 w-24 rounded" />
+            <div className="skeleton-shimmer h-2.5 w-28 rounded" />
+          </div>
+          <div className="skeleton-shimmer h-9 w-9 shrink-0 rounded-lg" />
+        </div>
+      ) : (
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className={cn("tabular font-display text-3xl font-bold leading-none tracking-tight sm:text-4xl", valueClass)}>
+              <AnimatedNumber value={value} decimals={decimals} suffix={suffix} />
+            </p>
+            <p className="mt-2 truncate text-sm font-semibold text-foreground">{label}</p>
+            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{sub}</p>
+          </div>
+          <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", iconClass)}>
+            <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+          </span>
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+function EmptyQueue({ onLaunch }: { onLaunch: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+      <ScanLine className="h-8 w-8 text-[#22D3EE]/60" aria-hidden="true" />
+      <p className="text-sm text-muted-foreground">No cases in this queue — run a screening first</p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="min-h-11 border-[#22D3EE]/40 text-[#22D3EE] hover:bg-[#22D3EE]/10 hover:text-[#22D3EE]"
+        onClick={onLaunch}
+      >
+        <ScanLine className="h-4 w-4" aria-hidden="true" />
+        Open live screening
+      </Button>
+    </div>
+  );
+}
+
+function QueueError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+      <TriangleAlert className="h-6 w-6 text-[#F87171]" aria-hidden="true" />
+      <p className="text-sm font-medium text-foreground">Couldn&apos;t load the queue</p>
+      <p className="text-xs text-muted-foreground">{message}</p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="min-h-11 border-white/15 hover:border-[#F87171]/40 hover:text-[#F87171]"
+        onClick={onRetry}
+      >
+        <RefreshCw className="h-4 w-4" aria-hidden="true" />
+        Retry
+      </Button>
+    </div>
+  );
+}
+
+function LesionStat({ count, label, color }: { count: number; label: string; color: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-center">
+      <AnimatedNumber value={count} className="font-display text-xl font-bold" />
+      <p className="mt-0.5 flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} aria-hidden="true" />
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function ModalSkeleton() {
+  return (
+    <div className="grid gap-6 p-6 lg:grid-cols-2">
+      <div className="space-y-3">
+        <div className="skeleton-shimmer aspect-square w-full rounded-xl" />
+        <div className="flex flex-wrap gap-2">
+          {LEGEND.map((l) => (
+            <div key={l.label} className="skeleton-shimmer h-6 w-16 rounded-full" />
+          ))}
+        </div>
+      </div>
+      <div className="space-y-4">
+        <div className="skeleton-shimmer h-32 w-full rounded-xl" />
+        <div className="skeleton-shimmer h-20 w-full rounded-xl" />
+        <div className="grid grid-cols-3 gap-2">
+          <div className="skeleton-shimmer h-20 rounded-lg" />
+          <div className="skeleton-shimmer h-20 rounded-lg" />
+          <div className="skeleton-shimmer h-20 rounded-lg" />
+        </div>
+        <div className="skeleton-shimmer h-24 w-full rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Main view
+// ────────────────────────────────────────────────────────────
+
+export default function DashboardView() {
+  const { navigate } = useNav();
+
+  // full dataset (stats + tab counts)
+  const [allRows, setAllRows] = useState<PatientRow[] | null>(null);
+  const [allLoading, setAllLoading] = useState(true);
+  const [allError, setAllError] = useState<string | null>(null);
+
+  // current filter queue
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [rows, setRows] = useState<PatientRow[] | null>(null);
+  const [rowsLoading, setRowsLoading] = useState(true);
+  const [rowsError, setRowsError] = useState<string | null>(null);
+
+  // report modal
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<PatientDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailNonce, setDetailNonce] = useState(0);
+
+  // local sign-off overrides (no server write endpoint — demo session state)
+  const signedOffRef = useRef<Record<string, boolean>>({});
+  const [signedOff, setSignedOff] = useState<Record<string, boolean>>({});
+  const quietRefreshRef = useRef(false);
+
+  const applyOverrides = useCallback(
+    (list: PatientRow[]): PatientRow[] =>
+      list.map((r) => (signedOffRef.current[r.patient_id] ? { ...r, status: "AUTO_CLEARED" as CaseStatus } : r)),
+    []
+  );
+
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!silent) setAllLoading(true);
+      setAllError(null);
+      try {
+        const res = await fetch("/api/patients");
+        if (!res.ok) throw new Error(`API returned ${res.status}`);
+        const data = (await res.json()) as { patients: PatientRow[] };
+        setAllRows(applyOverrides(data.patients ?? []));
+      } catch (e) {
+        quietRefreshRef.current = false;
+        setAllError(e instanceof Error ? e.message : "Failed to load cases");
+      } finally {
+        setAllLoading(false);
+      }
+    },
+    [applyOverrides]
+  );
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  // queue rows follow the active filter; "all" reuses the already-loaded list
+  useEffect(() => {
+    if (filter === "all" && allRows) {
+      setRows(allRows);
+      setRowsLoading(false);
+      setRowsError(null);
+      return;
+    }
+    const quiet = quietRefreshRef.current;
+    quietRefreshRef.current = false;
+    let cancelled = false;
+    if (!quiet) setRowsLoading(true);
+    setRowsError(null);
+    fetch(`/api/patients?filter=${filter}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`API returned ${res.status}`);
+        return (await res.json()) as { patients: PatientRow[] };
+      })
+      .then((d) => {
+        if (!cancelled) setRows(applyOverrides(d.patients ?? []));
+      })
+      .catch((e) => {
+        if (!cancelled) setRowsError(e instanceof Error ? e.message : "Failed to load queue");
+      })
+      .finally(() => {
+        if (!cancelled && !quiet) setRowsLoading(false);
+        if (quiet) setRowsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filter, allRows, applyOverrides]);
+
+  // report detail fetch on modal open / retry
+  useEffect(() => {
+    if (!openId) return;
+    let cancelled = false;
+    setDetailLoading(true);
+    setDetailError(null);
+    setDetail(null);
+    fetch(`/api/patients/${encodeURIComponent(openId)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`API returned ${res.status}`);
+        return (await res.json()) as PatientDetail;
+      })
+      .then((d) => {
+        if (cancelled) return;
+        if (signedOffRef.current[openId] && d.details) {
+          setDetail({ ...d, status: "AUTO_CLEARED", details: { ...d.details, status: "AUTO_CLEARED" } });
+        } else {
+          setDetail(d);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setDetailError(e instanceof Error ? e.message : "Failed to load report");
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openId, detailNonce]);
+
+  const stats = useMemo(() => {
+    const list = allRows ?? [];
+    const today = new Date().toDateString();
+    const screenedToday = list.filter((r) => new Date(r.created_at).toDateString() === today).length;
+    const referable = list.filter((r) => r.class_level >= 2 && r.status !== "REJECTED").length;
+    const urgentCount = list.filter((r) => r.status === "URGENT").length;
+    const queue = list.filter((r) => r.status === "NEEDS_REVIEW" || r.status === "URGENT").length;
+    const avgMs = list.length ? list.reduce((a, r) => a + r.processing_ms, 0) / list.length : 0;
+    return { screenedToday, referable, urgentCount, queue, avgSec: avgMs / 1000 };
+  }, [allRows]);
+
+  const counts = useMemo(() => {
+    const list = allRows ?? [];
+    const c: Record<FilterKey, number> = { all: list.length, auto_cleared: 0, needs_review: 0, urgent: 0, rejected: 0 };
+    for (const r of list) {
+      if (r.status === "AUTO_CLEARED") c.auto_cleared++;
+      else if (r.status === "NEEDS_REVIEW") c.needs_review++;
+      else if (r.status === "URGENT") c.urgent++;
+      else if (r.status === "REJECTED") c.rejected++;
+    }
+    return c;
+  }, [allRows]);
+
+  const openReport = useCallback((patientId: string) => {
+    setOpenId(patientId);
+    setDetailNonce((n) => n + 1);
+  }, []);
+
+  function handleSignOff(patientId: string) {
+    toast.success("Signed off — case marked reviewed");
+    signedOffRef.current = { ...signedOffRef.current, [patientId]: true };
+    setSignedOff((s) => ({ ...s, [patientId]: true }));
+    const flip = (r: PatientRow): PatientRow => (r.patient_id === patientId ? { ...r, status: "AUTO_CLEARED" } : r);
+    setAllRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
+    setRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
+    setDetail((prev) =>
+      prev && prev.details
+        ? { ...prev, status: "AUTO_CLEARED", details: { ...prev.details, status: "AUTO_CLEARED" } }
+        : prev
+    );
+    // quiet refresh of stats + counts (list already flipped optimistically)
+    quietRefreshRef.current = true;
+    void loadAll(true);
+  }
+
+  const detailResult = detail?.details ?? null;
+  const isRejected = detailResult ? detailResult.status === "REJECTED" || detailResult.gate.accepted === false : false;
+  const canSign =
+    !!detailResult && (detailResult.status === "NEEDS_REVIEW" || detailResult.status === "URGENT") && !signedOff[openId ?? ""];
+
+  return (
+    <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+      <SectionHeading
+        eyebrow="HUMAN-IN-THE-LOOP"
+        title={
+          <>
+            Doctor Dashboard — <span className="text-glow-cyan">Review Queue</span>
+          </>
+        }
+        sub="HIGH-trust cases auto-clear. MODERATE cases wait for your sign-off. Urgent and DME cases jump the queue."
+      />
+      <Reveal className="-mt-4 mb-10 flex justify-center">
+        <span className="chip border-[#FBBF24]/40 bg-[#2A2210]/60 text-[#FBBF24]">
+          <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+          Demo data — simulated screening records
+        </span>
+      </Reveal>
+
+      {/* 1 ── Stats cards */}
+      <Reveal delay={0.05}>
+        {allError ? (
+          <GlassCard className="border-[#F87171]/30 p-4 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <TriangleAlert className="h-5 w-5 shrink-0 text-[#F87171]" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Couldn&apos;t load dashboard stats</p>
+                  <p className="text-xs text-muted-foreground">{allError}</p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="min-h-11 shrink-0 border-[#F87171]/40 text-[#F87171] hover:bg-[#F87171]/10 hover:text-[#F87171]"
+                onClick={() => void loadAll()}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                Retry
+              </Button>
+            </div>
+          </GlassCard>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <StatCard
+              icon={ScanEye}
+              label="Screened today"
+              sub="cases through the DRISHTI pipeline today"
+              value={stats.screenedToday}
+              valueClass="text-[#22D3EE]"
+              iconClass="border-[#22D3EE]/30 bg-[#22D3EE]/10 text-[#22D3EE]"
+              loading={allLoading}
+            />
+            <StatCard
+              icon={Crosshair}
+              label="Referable caught"
+              sub="grade ≥ Moderate NPDR · refer within 3-6 months"
+              value={stats.referable}
+              valueClass="text-[#FBBF24]"
+              iconClass="border-[#FBBF24]/30 bg-[#FBBF24]/10 text-[#FBBF24]"
+              loading={allLoading}
+            />
+            <StatCard
+              icon={ClipboardList}
+              label="Review queue"
+              sub="MODERATE + URGENT awaiting doctor sign-off"
+              value={stats.queue}
+              valueClass={stats.urgentCount > 0 ? "text-[#F87171]" : "text-[#FBBF24]"}
+              iconClass={
+                stats.urgentCount > 0
+                  ? "border-[#F87171]/30 bg-[#F87171]/10 text-[#F87171]"
+                  : "border-[#FBBF24]/30 bg-[#FBBF24]/10 text-[#FBBF24]"
+              }
+              loading={allLoading}
+            />
+            <StatCard
+              icon={Timer}
+              label="Avg processing time"
+              sub="gate → evidence → CNN → Grad-CAM → trust"
+              value={stats.avgSec}
+              decimals={1}
+              suffix="s"
+              valueClass="text-[#34D399]"
+              iconClass="border-[#34D399]/30 bg-[#34D399]/10 text-[#34D399]"
+              loading={allLoading}
+            />
+          </div>
+        )}
+      </Reveal>
+
+      {/* 2 ── Filter tabs */}
+      <Reveal delay={0.1} className="mt-8">
+        <div className="drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
+          {FILTER_TABS.map((t) => {
+            const active = filter === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setFilter(t.key)}
+                className={cn(
+                  "flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium transition-all duration-200 sm:text-sm",
+                  active
+                    ? "border-[#22D3EE]/40 bg-[#22D3EE]/15 text-[#22D3EE]"
+                    : "border-white/10 bg-white/[0.03] text-muted-foreground hover:border-white/20 hover:text-foreground"
+                )}
+              >
+                {t.label}
+                <span
+                  className={cn(
+                    "tabular rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                    active ? "bg-[#22D3EE]/20 text-[#22D3EE]" : "bg-white/5 text-muted-foreground"
+                  )}
+                >
+                  {allRows ? counts[t.key] : "·"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </Reveal>
+
+      {/* 3 ── Patient table (desktop) */}
+      <Reveal delay={0.15} className="mt-4 hidden md:block">
+        <GlassCard className="p-0">
+          {rowsError ? (
+            <QueueError message={rowsError} onRetry={() => void loadAll()} />
+          ) : rowsLoading || !rows ? (
+            <div className="space-y-3 p-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="skeleton-shimmer h-10 w-full rounded-lg" />
+              ))}
+            </div>
+          ) : rows.length === 0 ? (
+            <EmptyQueue onLaunch={() => navigate("screening")} />
+          ) : (
+            <div className="drishti-scroll max-h-[480px] overflow-y-auto">
+              <Table>
+                <TableHeader className="sticky top-0 z-10 bg-[#0A1628]/95 backdrop-blur">
+                  <TableRow className="border-white/10 hover:bg-transparent">
+                    <TableHead className="text-xs uppercase tracking-wider">Patient ID</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wider">Date</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wider">Grade</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wider">Confidence</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wider">Trust</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wider">Status</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wider">DME</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wider">Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r) => {
+                    const gColor = rowGradeColor(r);
+                    return (
+                      <TableRow
+                        key={r.id}
+                        tabIndex={0}
+                        aria-label={`Open report for ${r.patient_id}`}
+                        onClick={() => openReport(r.patient_id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            openReport(r.patient_id);
+                          }
+                        }}
+                        className="cursor-pointer border-white/5 hover:bg-white/[0.03] focus-visible:bg-white/[0.05] focus-visible:outline-none"
+                      >
+                        <TableCell className="py-3">
+                          <span className="font-display font-semibold text-foreground">{r.patient_id}</span>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <span className="tabular text-xs text-muted-foreground">{fmtDate(r.created_at)}</span>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <span
+                            className={cn("text-sm font-medium", !gColor && "text-muted-foreground")}
+                            style={gColor ? { color: gColor } : undefined}
+                          >
+                            {r.grade || "—"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <span className="tabular text-sm text-foreground/90">{(r.confidence * 100).toFixed(1)}%</span>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <TrustChip level={r.trust_level} />
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <StatusChip status={r.status} />
+                        </TableCell>
+                        <TableCell className="py-3">
+                          {r.dme_risk ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#F87171]">
+                              <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                              DME
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="py-3 text-right">
+                          <span className="tabular text-xs text-muted-foreground">{(r.processing_ms / 1000).toFixed(1)}s</span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </GlassCard>
+      </Reveal>
+
+      {/* 3b ── Mobile cards */}
+      <div className="mt-4 grid gap-3 md:hidden">
+        {rowsError ? (
+          <GlassCard className="p-0">
+            <QueueError message={rowsError} onRetry={() => void loadAll()} />
+          </GlassCard>
+        ) : rowsLoading || !rows ? (
+          Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton-shimmer h-28 w-full rounded-xl" />)
+        ) : rows.length === 0 ? (
+          <GlassCard className="p-0">
+            <EmptyQueue onLaunch={() => navigate("screening")} />
+          </GlassCard>
+        ) : (
+          rows.map((r) => {
+            const gColor = rowGradeColor(r);
+            return (
+              <GlassCard
+                key={r.id}
+                hover
+                className="glass-card-hover cursor-pointer p-4"
+              >
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  aria-label={`Open report for ${r.patient_id}`}
+                  onClick={() => openReport(r.patient_id)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-display font-semibold text-foreground">{r.patient_id}</p>
+                      <p className="tabular mt-0.5 text-xs text-muted-foreground">{fmtDate(r.created_at)}</p>
+                    </div>
+                    <TrustChip level={r.trust_level} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span
+                      className={cn(
+                        "chip",
+                        !gColor && "border-white/25 text-muted-foreground"
+                      )}
+                      style={gColor ? { borderColor: `${gColor}55`, color: gColor } : undefined}
+                    >
+                      {gColor && <span className="h-1.5 w-1.5 rounded-full" style={{ background: gColor }} aria-hidden="true" />}
+                      {r.grade || "—"}
+                    </span>
+                    <StatusChip status={r.status} />
+                    {r.dme_risk && (
+                      <span className="chip border-[#F87171]/40 text-[#F87171]">
+                        <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+                        DME
+                      </span>
+                    )}
+                  </div>
+                  <div className="tabular mt-2.5 flex gap-4 text-xs text-muted-foreground">
+                    <span>Conf {(r.confidence * 100).toFixed(1)}%</span>
+                    <span>{(r.processing_ms / 1000).toFixed(1)}s</span>
+                  </div>
+                </button>
+              </GlassCard>
+            );
+          })
+        )}
+      </div>
+
+      {/* 4 ── Report modal */}
+      <Dialog open={openId !== null} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
+        <DialogContent
+          aria-describedby={undefined}
+          className={cn(
+            "max-h-[85vh] max-w-4xl gap-0 overflow-y-auto overflow-x-hidden border-[#22D3EE]/25 bg-[#0B1526]/95 p-0 backdrop-blur-xl sm:max-w-4xl drishti-scroll"
+          )}
+        >
+          {detailLoading && <ModalSkeleton />}
+
+          {!detailLoading && detailError && (
+            <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+              <TriangleAlert className="h-6 w-6 text-[#F87171]" aria-hidden="true" />
+              <p className="text-sm font-medium text-foreground">Couldn&apos;t load the report</p>
+              <p className="text-xs text-muted-foreground">{detailError}</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="min-h-11 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+                onClick={() => setDetailNonce((n) => n + 1)}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                Retry
+              </Button>
+            </div>
+          )}
+
+          {!detailLoading && !detailError && detailResult && openId && (
+            <>
+              <div className="px-6 pt-6">
+                <DialogHeader>
+                  <DialogTitle className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-display text-xl">
+                    <span>{detailResult.patient_id}</span>
+                    {(() => {
+                      const gc =
+                        detailResult.status === "REJECTED" || detailResult.classification.class_level < 0
+                          ? undefined
+                          : icdrColor(detailResult.classification.class_level);
+                      return (
+                        <span
+                          className={cn("text-sm font-semibold", !gc && "text-muted-foreground")}
+                          style={gc ? { color: gc } : undefined}
+                        >
+                          {detailResult.classification.predicted_class || "—"}
+                        </span>
+                      );
+                    })()}
+                  </DialogTitle>
+                  <DialogDescription className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                    <span className="tabular">Screened {fmtDate(detailResult.created_at)}</span>
+                    <span aria-hidden="true">·</span>
+                    <StatusChip status={detailResult.status} />
+                    <TrustChip level={detailResult.trust.trust_level} />
+                  </DialogDescription>
+                </DialogHeader>
+              </div>
+
+              <div className="grid gap-6 p-6 lg:grid-cols-2">
+                {/* LEFT — retina + evidence overlay */}
+                <div className="space-y-3">
+                  <div className="overflow-hidden rounded-xl border border-[#22D3EE]/20">
+                    <RetinaView
+                      severity={
+                        isRejected ? 0 : Math.max(0, Math.min(4, detailResult.classification.class_level))
+                      }
+                      dmeRisk={detailResult.evidence.dme_risk}
+                      lesions={detailResult.evidence.lesions}
+                      gradcam={detailResult.evidence.gradcam}
+                      layers={{ vessels: true, ma: true, hem: true, ex: true, dme: true, gradcam: true }}
+                      rejected={isRejected}
+                      className="aspect-square w-full"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-1.5" aria-label="Evidence overlay legend">
+                    {LEGEND.map((l) => (
+                      <span
+                        key={l.label}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                      >
+                        <span className="h-2 w-2 rounded-full" style={{ background: l.color }} aria-hidden="true" />
+                        {l.label}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Grad-CAM highlights the regions that drove the CNN decision — the model attends to lesions, not
+                    artifacts.
+                  </p>
+                </div>
+
+                {/* RIGHT — trust breakdown */}
+                <div className="space-y-5">
+                  <div className="flex items-center gap-5">
+                    <ScoreDial
+                      value={detailResult.trust.trust_score}
+                      size={128}
+                      label="Trust"
+                      sublabel={detailResult.trust.trust_level}
+                    />
+                    <div className="min-w-0 space-y-2">
+                      <TrustChip level={detailResult.trust.trust_level} />
+                      <p className="text-sm leading-snug text-muted-foreground">{detailResult.trust.route}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-around rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                    <ScoreDial value={detailResult.gate.quality_score} size={90} label="Quality" />
+                    <ScoreDial value={detailResult.explainability.consistency} size={90} label="Consistency" />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <LesionStat count={detailResult.evidence.ma_count} label="MA" color="#e0331f" />
+                    <LesionStat count={detailResult.evidence.hem_count} label="HEM" color="#9b1c1c" />
+                    <LesionStat count={detailResult.evidence.ex_count} label="EX" color="#f2d66c" />
+                  </div>
+
+                  {!isRejected ? (
+                    <div className="space-y-2.5">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Class probabilities — top 3
+                      </p>
+                      {Object.entries(detailResult.classification.probabilities)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 3)
+                        .map(([label, value], i) => (
+                          <ConfBar
+                            key={label}
+                            label={label}
+                            value={value}
+                            color={icdrColor(ICDR_CLASSES.find((c) => c.short === label)?.level ?? -1) ?? "#22D3EE"}
+                            active={label === detailResult.classification.predicted_class}
+                            delay={i * 90}
+                          />
+                        ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-2 rounded-lg border border-[#F87171]/40 bg-[#2E0F12]/70 p-3">
+                      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#F87171]" aria-hidden="true" />
+                      <div>
+                        <p className="text-sm font-semibold text-[#F87171]">Image failed the quality gate</p>
+                        <p className="text-xs text-[#F8A5A5]/80">{detailResult.gate.message}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {detailResult.evidence.dme_risk && !isRejected && (
+                    <div className="flex items-start gap-2 rounded-lg border border-[#F87171]/40 bg-[#2E0F12]/70 p-3">
+                      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#F87171]" aria-hidden="true" />
+                      <div>
+                        <p className="text-sm font-semibold text-[#F87171]">DME risk flagged</p>
+                        <p className="text-xs text-[#F8A5A5]/80">{detailResult.evidence.dme_message}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {TIMING_KEYS.map((k) => (
+                      <span
+                        key={k}
+                        className="chip border-white/10 bg-white/[0.03] text-muted-foreground"
+                      >
+                        {k}
+                        <span className="tabular">{detailResult.timings_ms[k]}ms</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="flex-col gap-3 border-t border-white/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                  Demo data — simulated case
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    variant="outline"
+                    className="min-h-11 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+                    onClick={() => downloadReportPdf(detailResult)}
+                  >
+                    <Download className="h-4 w-4" aria-hidden="true" />
+                    Download PDF
+                  </Button>
+                  {signedOff[openId] ? (
+                    <span className="chip border-[#34D399]/40 text-[#34D399]">
+                      <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                      Signed off
+                    </span>
+                  ) : canSign ? (
+                    <Button
+                      className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B]"
+                      onClick={() => handleSignOff(openId)}
+                    >
+                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                      Approve &amp; sign-off
+                    </Button>
+                  ) : null}
+                </div>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}

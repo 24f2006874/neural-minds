@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// One row per completed DRISHTI screening run
+model Screening {
+  id               String   @id @default(cuid())
+  patientId        String   @unique
+  createdAt        DateTime @default(now())
+  // Trust Gate (Module 1)
+  qualityScore     Float
+  gateAccepted     Boolean
+  enhanced         Boolean
+  // Evidence Engine (Module 2)
+  maCount          Int
+  hemCount         Int
+  exCount          Int
+  vesselDensityPct Float
+  dmeRisk          Boolean
+  dmeMessage       String
+  // Classification (Module 3)
+  predictedClass   String
+  classLevel       Int
+  confidence       Float
+  probabilities    String // JSON string: { label: prob }
+  // Explainability (Module 4)
+  consistency      Float
+  verdict          String
+  centroidDistance Float
+  regionOverlap    Float
+  // Trust routing (Module 5)
+  trustScore       Float
+  trustLevel       String // HIGH | MODERATE | LOW
+  route            String
+  status           String // AUTO_CLEARED | NEEDS_REVIEW | URGENT | REJECTED
+  // Full pipeline result JSON (incl. lesion coords, gradcam config)
+  details          String
+  processingMs     Int
+}
