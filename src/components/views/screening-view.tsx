@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Camera, FileDown, Loader2, RotateCcw, ScanEye, Send, TriangleAlert, Upload } from "lucide-react";
+import {
+  Camera,
+  Clock3,
+  FileDown,
+  History,
+  Loader2,
+  RotateCcw,
+  ScanEye,
+  Send,
+  TriangleAlert,
+  Upload,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { AnimatedNumber } from "@/components/drishti/animated-number";
@@ -24,6 +35,26 @@ import { downloadReportPdf } from "@/lib/report-pdf";
 import { cn } from "@/lib/utils";
 
 type Phase = "idle" | "running" | "done" | "rejected" | "error";
+
+interface RecentRun {
+  patient_id: string;
+  created_at: string;
+  grade: string;
+  class_level: number;
+  trust_level: "HIGH" | "MODERATE" | "LOW";
+  status: string;
+}
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const m = Math.round(ms / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  return d === 1 ? "yesterday" : `${d}d ago`;
+}
 
 /* ── Pipeline stage definitions (durations are injected from result.timings_ms) ── */
 const STAGE_BASE: Array<{ key: string; label: string; desc: string }> = [
@@ -192,11 +223,28 @@ export default function ScreeningView() {
   const [elapsed, setElapsed] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
   const [runNonce, setRunNonce] = useState(0);
+  const [recent, setRecent] = useState<RecentRun[] | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const clockRef = useRef<number | null>(null);
   const lastAttemptRef = useRef<{ pid: string; file: File | null }>({ pid: "", file: null });
+
+  const loadRecent = useCallback((quiet = false) => {
+    if (!quiet) setRecent(null);
+    fetch("/api/patients")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((d: { patients?: RecentRun[] }) => {
+        setRecent((d.patients ?? []).slice(0, 6));
+      })
+      .catch(() => {
+        setRecent([]);
+      });
+  }, []);
+
+  useEffect(() => {
+    void loadRecent();
+  }, [loadRecent]);
 
   useEffect(() => {
     return () => {
@@ -240,6 +288,7 @@ export default function ScreeningView() {
       setElapsed(el);
       if (el < stopAt) return;
       stopClock();
+      loadRecent(true);
       if (rejected) {
         setPhase("rejected");
         toast.error("Quality gate rejected the image — recapture required");
@@ -522,6 +571,50 @@ export default function ScreeningView() {
                 {TRUST_THRESHOLDS.HIGH} · MODERATE {TRUST_THRESHOLDS.MODERATE_LOW}–{TRUST_THRESHOLDS.HIGH} · LOW &lt;{" "}
                 {TRUST_THRESHOLDS.MODERATE_LOW}. Demo only — not a medical device.
               </p>
+
+              {/* recent runs — live from the screening register */}
+              <div className="space-y-1.5 border-t border-white/8 pt-4">
+                <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <History className="h-3.5 w-3.5" aria-hidden="true" />
+                  From the register — tap to re-run
+                </span>
+                {!recent ? (
+                  <div className="space-y-1.5 pt-1">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="skeleton-shimmer h-9 w-full rounded-lg" />
+                    ))}
+                  </div>
+                ) : recent.length === 0 ? (
+                  <p className="pt-1 text-[11px] text-muted-foreground/70">No screenings yet — your runs will appear here.</p>
+                ) : (
+                  <ul className="drishti-scroll max-h-44 space-y-1.5 overflow-y-auto pr-1">
+                    {recent.map((r) => {
+                      const dot = ICDR_CLASSES[r.class_level]?.color ?? "#8296b3";
+                      return (
+                        <li key={r.patient_id}>
+                          <button
+                            type="button"
+                            onClick={() => runPreset(r.patient_id)}
+                            disabled={phase === "running"}
+                            className="group flex min-h-9 w-full items-center gap-2 rounded-lg border border-white/8 bg-white/[0.02] px-2.5 py-1.5 text-left transition-all duration-200 hover:border-[#22D3EE]/40 hover:bg-[#22D3EE]/5 disabled:pointer-events-none disabled:opacity-50"
+                          >
+                            <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: dot, boxShadow: `0 0 8px ${dot}66` }} />
+                            <span className="font-display min-w-0 flex-1 truncate text-xs font-semibold">{r.patient_id}</span>
+                            <span className="hidden truncate text-[10px] text-muted-foreground sm:block">{r.grade}</span>
+                            <span
+                              className="flex shrink-0 items-center gap-1 text-[10px] tabular"
+                              style={{ color: trustColors[r.trust_level] }}
+                            >
+                              <Clock3 className="h-3 w-3" aria-hidden="true" />
+                              {timeAgo(r.created_at)}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             </div>
           </GlassCard>
         </Reveal>

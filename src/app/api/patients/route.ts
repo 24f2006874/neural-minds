@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
       dme_risk: r.dmeRisk,
       quality_score: r.qualityScore,
       processing_ms: r.processingMs,
+      reviewed_by: r.reviewedBy,
+      reviewed_at: r.reviewedAt,
     })),
   });
 }

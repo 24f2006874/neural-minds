@@ -41,4 +41,8 @@ model Screening {
   // Full pipeline result JSON (incl. lesion coords, gradcam config)
   details          String
   processingMs     Int
+  // Human-in-the-loop audit trail
+  reviewedBy       String?
+  reviewedAt       DateTime?
+  reviewNote       String?
 }

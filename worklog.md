@@ -194,3 +194,21 @@ Work Log:
 Stage Summary:
 - ALL 7 VIEWS + 6 API ENDPOINTS + DB SEEDED + E2E VERIFIED. Project is complete and demo-ready.
 - Known cosmetic notes: THREE.Clock deprecation warning (three.js internal, harmless); sign-off in dashboard is session-local (no PATCH endpoint yet — candidate next-phase item).
+
+---
+Task ID: r2 (cron review round 2)
+Agent: Z.ai Code (cron webDevReview)
+Task: Status assessment, QA pass, sign-off persistence + CSV export + recent-runs + shell polish
+
+Work Log:
+- Reviewed worklog (all 7 views complete, E2E verified in round 1). Assessed live state: dev server healthy, agent-browser sweep across all 7 views → zero page errors; 3D eye re-renders correctly after navigation (Context Lost log is benign unmount disposal). Verdict: stable → advanced features per mandate.
+- [Dev-infra] Dev server had died between rounds (process gone, port closed) — restarted with nohup; health 200. Future rounds: always check `curl /api/health` first and restart if needed.
+- [Feature] Persistent doctor sign-off: schema +3 audit fields (reviewedBy/reviewedAt/reviewNote), `bun run db:push`; new PATCH /api/patients/{id}/status (validates status enum, 409-guards REJECTED cases, syncs embedded details JSON); dashboard handleSignOff now PATCHes server-side (loading state "Signing off…", error toasts) and the modal shows a green "Signed off · Dr. Review · <time>" audit chip (title tooltip documents the trail). Verified: PATCH 200 persists; reload shows updated stats (review queue 10→8); guard test on BADPHOTO-001 → 409 as designed.
+- [Feature] CSV register export: GET /api/patients/export?filter=… streams 18-column CSV (Content-Disposition attachment, dated filename); "Export CSV" button beside filter tabs follows the active filter. Verified headers + body via curl.
+- [Feature] Screening view "From the register — tap to re-run": live strip of the 6 newest screenings (ICDR-colored dots, grade, relative time via Clock3), skeleton loading, auto-refreshes after every completed run; tapping any entry re-runs that case (works for non-demo IDs too since /api/screen synthesizes).
+- [Styling] Shell: view switches now animate via AnimatePresence (fade + 14px rise, 320ms ease-out, mode="wait"); cinematic scroll-progress hairline (cyan→green gradient, spring-smoothed scaleX) fixed under the header. Both respect prefers-reduced-motion via global rule.
+- QA: PATCH/CSV curl tests green; browser E2E of recent-runs strip, sign-off flow (toast + chip), Export CSV link present; `bun run lint` → 0 problems.
+
+Stage Summary:
+- Round-2 additions shipped: server-persisted human-in-the-loop sign-off (audit trail), CSV register export, live recent-runs strip, view transitions + scroll progress bar.
+- Remaining candidates for next round: (1) reopening/undo sign-off (PATCH back to NEEDS_REVIEW) with confirm dialog; (2) shared <ChartFrame> dark-recharts primitive (validation + capacity dedupe); (3) per-row reviewed ✓ indicator in dashboard table; (4) offline PWA manifest for the finale laptop; (5) animated counters on About PS card already done — could add "impact projection" section on Home linking capacity math to the 100k/year story.

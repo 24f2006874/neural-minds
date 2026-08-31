@@ -5,6 +5,7 @@ import {
   ClipboardList,
   Crosshair,
   Download,
+  FileDown,
   Info,
   RefreshCw,
   ScanEye,
@@ -52,12 +53,16 @@ interface PatientRow {
   dme_risk: boolean;
   quality_score: number;
   processing_ms: number;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
 }
 
 interface PatientDetail {
   patientId: string;
   status: CaseStatus;
   details: ScreeningResult | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
 }
 
 type FilterKey = "all" | "auto_cleared" | "needs_review" | "urgent" | "rejected";
@@ -257,9 +262,10 @@ export default function DashboardView() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailNonce, setDetailNonce] = useState(0);
 
-  // local sign-off overrides (no server write endpoint — demo session state)
+  // sign-off audit trail: patientId → who/when (persisted server-side via PATCH)
   const signedOffRef = useRef<Record<string, boolean>>({});
-  const [signedOff, setSignedOff] = useState<Record<string, boolean>>({});
+  const [signedOff, setSignedOff] = useState<Record<string, { by: string; at: string }>>({});
+  const [signingOff, setSigningOff] = useState<string | null>(null);
   const quietRefreshRef = useRef(false);
 
   const applyOverrides = useCallback(
@@ -383,27 +389,61 @@ export default function DashboardView() {
     setDetailNonce((n) => n + 1);
   }, []);
 
-  function handleSignOff(patientId: string) {
-    toast.success("Signed off — case marked reviewed");
-    signedOffRef.current = { ...signedOffRef.current, [patientId]: true };
-    setSignedOff((s) => ({ ...s, [patientId]: true }));
-    const flip = (r: PatientRow): PatientRow => (r.patient_id === patientId ? { ...r, status: "AUTO_CLEARED" } : r);
-    setAllRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
-    setRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
-    setDetail((prev) =>
-      prev && prev.details
-        ? { ...prev, status: "AUTO_CLEARED", details: { ...prev.details, status: "AUTO_CLEARED" } }
-        : prev
-    );
-    // quiet refresh of stats + counts (list already flipped optimistically)
-    quietRefreshRef.current = true;
-    void loadAll(true);
+  async function handleSignOff(patientId: string) {
+    if (signingOff) return;
+    setSigningOff(patientId);
+    try {
+      const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "AUTO_CLEARED", reviewed_by: "Dr. Review (dashboard demo)" }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? `API returned ${res.status}`);
+      }
+      const data = (await res.json()) as { reviewed_by: string; reviewed_at: string };
+      const at = data.reviewed_at ? new Date(data.reviewed_at).toLocaleString() : new Date().toLocaleString();
+      toast.success(`Signed off by ${data.reviewed_by} — saved to the register`);
+      signedOffRef.current = { ...signedOffRef.current, [patientId]: true };
+      setSignedOff((s) => ({ ...s, [patientId]: { by: data.reviewed_by, at } }));
+      const flip = (r: PatientRow): PatientRow =>
+        r.patient_id === patientId
+          ? { ...r, status: "AUTO_CLEARED", reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at }
+          : r;
+      setAllRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
+      setRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
+      setDetail((prev) =>
+        prev && prev.details
+          ? { ...prev, status: "AUTO_CLEARED", details: { ...prev.details, status: "AUTO_CLEARED" } }
+          : prev
+      );
+      // quiet refresh of stats + counts (list already flipped optimistically)
+      quietRefreshRef.current = true;
+      void loadAll(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Sign-off failed — try again");
+    } finally {
+      setSigningOff(null);
+    }
   }
 
   const detailResult = detail?.details ?? null;
   const isRejected = detailResult ? detailResult.status === "REJECTED" || detailResult.gate.accepted === false : false;
   const canSign =
     !!detailResult && (detailResult.status === "NEEDS_REVIEW" || detailResult.status === "URGENT") && !signedOff[openId ?? ""];
+  const reviewedAtText = (() => {
+    const iso = detail?.reviewed_at ?? null;
+    if (!iso) return signedOff[openId ?? ""]?.at ?? "";
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return "";
+    }
+  })();
+  const reviewNoteText = detail?.reviewed_by
+    ? `Audit trail: signed off by ${detail.reviewed_by}${reviewedAtText ? ` at ${reviewedAtText}` : ""} — persisted in the screening register`
+    : "Audit trail: signed off — persisted in the screening register";
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
@@ -494,9 +534,10 @@ export default function DashboardView() {
         )}
       </Reveal>
 
-      {/* 2 ── Filter tabs */}
+      {/* 2 ── Filter tabs + register export */}
       <Reveal delay={0.1} className="mt-8">
-        <div className="drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
           {FILTER_TABS.map((t) => {
             const active = filter === t.key;
             return (
@@ -525,6 +566,16 @@ export default function DashboardView() {
               </button>
             );
           })}
+          </div>
+          <a
+            href={`/api/patients/export?filter=${filter}`}
+            download
+            className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+            title="Download the current queue as a CSV register"
+          >
+            <FileDown className="h-4 w-4" aria-hidden="true" />
+            Export CSV
+          </a>
         </div>
       </Reveal>
 
@@ -866,18 +917,23 @@ export default function DashboardView() {
                     <Download className="h-4 w-4" aria-hidden="true" />
                     Download PDF
                   </Button>
-                  {signedOff[openId] ? (
-                    <span className="chip border-[#34D399]/40 text-[#34D399]">
+                  {signedOff[openId] || detail?.reviewed_by ? (
+                    <span
+                      className="chip min-h-11 border-[#34D399]/40 bg-[#0A2E24]/60 text-[#34D399]"
+                      title={reviewNoteText}
+                    >
                       <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                      Signed off
+                      Signed off · {(signedOff[openId]?.by ?? detail?.reviewed_by ?? "").split(" (")[0]}
+                      {reviewedAtText ? ` · ${reviewedAtText}` : ""}
                     </span>
                   ) : canSign ? (
                     <Button
-                      className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B]"
-                      onClick={() => handleSignOff(openId)}
+                      className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B] disabled:opacity-60"
+                      onClick={() => void handleSignOff(openId)}
+                      disabled={signingOff === openId}
                     >
                       <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                      Approve &amp; sign-off
+                      {signingOff === openId ? "Signing off…" : "Approve & sign-off"}
                     </Button>
                   ) : null}
                 </div>

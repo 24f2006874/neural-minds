@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useScroll, useSpring } from "framer-motion";
 import {
   BadgeCheck,
   Eye,
@@ -75,7 +75,19 @@ export function NavProvider({ children }: { children: (view: ViewKey) => ReactNo
 
   return (
     <NavContext.Provider value={value}>
-      <Shell view={view}>{children(view)}</Shell>
+      <Shell view={view}>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={view}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.32, ease: "easeOut" }}
+          >
+            {children(view)}
+          </motion.div>
+        </AnimatePresence>
+      </Shell>
     </NavContext.Provider>
   );
 }
@@ -288,9 +300,17 @@ function Footer() {
 // ── Shell ─────────────────────────────────────────────────────────────
 
 function Shell({ children }: { view: ViewKey; children: ReactNode }) {
+  const { scrollYProgress } = useScroll();
+  const progress = useSpring(scrollYProgress, { stiffness: 140, damping: 28, mass: 0.4 });
   return (
     <div className="drishti-scene flex min-h-screen flex-col">
       <Header />
+      {/* scroll progress — cinematic cyan hairline */}
+      <motion.div
+        aria-hidden
+        className="fixed inset-x-0 top-16 z-50 h-[2px] origin-left bg-gradient-to-r from-[#22D3EE] via-[#34D399] to-[#22D3EE]"
+        style={{ scaleX: progress, boxShadow: "0 0 12px rgba(34,211,238,0.55)" }}
+      />
       <main className="flex-1">{children}</main>
       <Footer />
     </div>
