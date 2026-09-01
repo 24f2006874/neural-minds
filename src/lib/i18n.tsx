@@ -119,6 +119,27 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "dash.selectAll": { en: "Select all signable cases in this lane", hi: "इस पंक्ति के सभी साइन-ऑफ़ योग्य केस चुनें" },
   "dash.sortBy": { en: "Sort by {col}", hi: "{col} के अनुसार क्रमित करें" },
 
+  // ── camp-day register filter ────────────────────────────────
+  "dash.day.group": { en: "Filter the register by camp day", hi: "कैंप दिवस के अनुसार रजिस्टर छानें" },
+  "dash.day.all": { en: "All days", hi: "सभी दिन" },
+  "dash.day.tab": { en: "Day {n}", hi: "दिन {n}" },
+  "dash.day.count": { en: "{n} case{s}", hi: "{n} केस" },
+  "dash.day.print": { en: "Camp day: {day}", hi: "कैंप दिवस: {day}" },
+
+  // ── reviewing doctor picker ─────────────────────────────────
+  "dash.doctor.label": { en: "Reviewing doctor", hi: "समीक्षक डॉक्टर" },
+  "dash.doctor.title": {
+    en: "Recorded as the signer on every sign-off — saved on this device",
+    hi: "हर साइन-ऑफ़ पर साइनर के रूप में दर्ज — इस डिवाइस पर सुरक्षित",
+  },
+
+  // ── activity filter chips ───────────────────────────────────
+  "dash.activity.filterGroup": { en: "Filter decisions by type", hi: "प्रकार के अनुसार निर्णय छानें" },
+  "dash.activity.noneMatch": {
+    en: "No events of this type in the recorded decisions",
+    hi: "दर्ज निर्णयों में इस प्रकार की कोई घटना नहीं",
+  },
+
   "dash.toast.signed": { en: "Signed off by {by} — saved to the register", hi: "{by} द्वारा साइन-ऑफ़ — रजिस्टर में सुरक्षित" },
   "dash.toast.signFail": { en: "Sign-off failed — try again", hi: "साइन-ऑफ़ विफल — फिर प्रयास करें" },
   "dash.toast.reopened": { en: "Case reopened — returned to the {lane} queue", hi: "केस पुनः खोला गया — {lane} पंक्ति में वापस" },
@@ -151,6 +172,11 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "dash.activity.routed": { en: "Routed", hi: "रूट हुआ" },
   "dash.activity.showing": { en: "Latest {n} of {total} recorded decisions", hi: "दर्ज {total} निर्णयों में से नवीनतम {n}" },
   "dash.activity.openCase": { en: "Open case report", hi: "केस रिपोर्ट खोलें" },
+  "dash.activity.all": { en: "All", hi: "सभी" },
+  "dash.activity.filtered": {
+    en: "{n} {type} event{s} shown · {total} recorded",
+    hi: "दर्ज {total} निर्णयों में से {n} {type} घटनाएं",
+  },
 
   // ── bulk sign-off note ──────────────────────────────────────
   "dash.bulk.noteLabel": { en: "Note for the audit trail (optional)", hi: "ऑडिट ट्रेल के लिए नोट (वैकल्पिक)" },
@@ -163,6 +189,7 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "dash.print": { en: "Print register", hi: "रजिस्टर प्रिंट करें" },
   "dash.print.title": { en: "DRISHTI — Screening day register", hi: "DRISHTI — जांच दिवस रजिस्टर" },
   "dash.print.generated": { en: "Generated {date}", hi: "निर्मित {date}" },
+  "dash.print.doctor": { en: "Reviewing doctor: {name}", hi: "समीक्षक डॉक्टर: {name}" },
   "dash.print.page": { en: "Page {n}", hi: "पृष्ठ {n}" },
 
   // ── screening ────────────────────────────────────────────────

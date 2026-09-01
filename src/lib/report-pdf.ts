@@ -107,6 +107,33 @@ export function downloadReportPdf(result: ScreeningResult) {
     }
   }
 
+  // 6 · Audit history — every persisted human decision for THIS case (parity
+  // with the report modal's "Case audit history" section). Newest last.
+  const audit = (result.audit_log ?? []).slice(-20);
+  if (audit.length > 0) {
+    if (y > 215) {
+      doc.addPage();
+      y = 26;
+    }
+    const wrap = (s: string) => doc.splitTextToSize(s, 168) as string[];
+    section(
+      `6 · Audit history (${audit.length} recorded decision${audit.length === 1 ? "" : "s"})`,
+      audit.flatMap((ev) => {
+        const at = (() => {
+          try {
+            return new Date(ev.at).toLocaleString("en-US", {
+              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+            });
+          } catch {
+            return ev.at;
+          }
+        })();
+        const by = (ev.by ?? "").split(" (")[0];
+        return wrap(`• ${ev.action} · ${by} · ${at}${ev.note ? ` — ${ev.note}` : ""}`);
+      })
+    );
+  }
+
   // Referral timeline strip for non-rejected
   if (result.status !== "REJECTED") {
     doc.setFillColor(240, 246, 252);

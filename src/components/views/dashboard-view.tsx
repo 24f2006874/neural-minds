@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowRightLeft,
   ArrowUp,
+  CalendarDays,
   ChevronsUpDown,
   ClipboardList,
   Crosshair,
@@ -21,6 +22,7 @@ import {
   Search,
   SearchX,
   ShieldCheck,
+  Stethoscope,
   Timer,
   TriangleAlert,
   Undo2,
@@ -58,6 +60,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ICDR_CLASSES, type CaseAuditEvent, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
 import { useLang } from "@/lib/i18n";
 import { downloadRegisterPdf, downloadReportPdf, type RegisterRow } from "@/lib/report-pdf";
@@ -105,6 +108,21 @@ interface AuditEvent {
 }
 
 type FilterKey = "all" | "auto_cleared" | "needs_review" | "urgent" | "rejected";
+
+type AuditActionFilter = "ALL" | "SIGNED" | "REOPENED" | "ROUTED";
+
+// ── reviewing doctor identity (sign-off picker) ─────────────
+const DOCTOR_ROSTER = ["Dr. Ananya Rao", "Dr. Vikram Mehta", "Dr. Priya Nair", "Dr. S. Krishnan"];
+const DOCTOR_STORAGE_KEY = "drishti-doctor";
+const DEMO_SIGNER_SUFFIX = " (dashboard demo)";
+
+/** Local-calendar YYYY-MM-DD key for a screening timestamp — camp days are
+ *  calendar days at the camp's timezone, never UTC slices. */
+function dayKeyOf(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 type SortKey = "patient_id" | "created_at" | "grade" | "confidence" | "trust_score" | "status" | "processing_ms";
 
@@ -219,7 +237,7 @@ function StatCard({
       transition={{ duration: 0.45, delay: 0.06 * index, ease: "easeOut" }}
       className="h-full"
     >
-    <GlassCard className="glass-card-hover h-full p-4 hover:-translate-y-0.5 sm:p-6">
+    <GlassCard className="glass-card-hover group h-full p-4 hover:-translate-y-0.5 sm:p-6">
       {loading ? (
         <div className="flex items-start justify-between gap-3">
           <div className="w-full space-y-2.5">
@@ -238,7 +256,7 @@ function StatCard({
             <p className="mt-2 truncate text-sm font-semibold text-foreground">{label}</p>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{sub}</p>
           </div>
-          <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", iconClass)}>
+          <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-transform duration-300 group-hover:scale-110", iconClass)}>
             <Icon className="h-4.5 w-4.5" aria-hidden="true" />
           </span>
         </div>
@@ -405,6 +423,23 @@ export default function DashboardView() {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
+  // camp-day register filter (scopes the register below the lane tabs)
+  const [dayKey, setDayKey] = useState<string>("all");
+
+  // reviewing doctor identity — recorded as the signer on every sign-off
+  const [doctor, setDoctor] = useState(DOCTOR_ROSTER[0]);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(DOCTOR_STORAGE_KEY);
+      if (saved && DOCTOR_ROSTER.includes(saved)) setDoctor(saved);
+    } catch {
+      /* private mode — in-memory only */
+    }
+  }, []);
+
+  // activity feed type filter (register audit trail)
+  const [auditFilter, setAuditFilter] = useState<AuditActionFilter>("ALL");
+
   // sign-off audit trail: patientId → who/when (persisted server-side via PATCH)
   const signedOffRef = useRef<Record<string, boolean>>({});
   const [signedOff, setSignedOff] = useState<Record<string, { by: string; at: string; previousStatus: CaseStatus }>>({});
@@ -568,9 +603,39 @@ export default function DashboardView() {
     [allRows]
   );
 
+  // distinct camp days in the register (chronological; Day 1 = earliest)
+  const campDays = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of allRows ?? []) {
+      const key = dayKeyOf(r.created_at);
+      if (!key) continue;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([key, count], i) => ({ key, day: i + 1, count }));
+  }, [allRows]);
+
+  // per-type counts + filtered feed for the activity timeline chips
+  const auditCounts = useMemo(() => {
+    const c: Record<AuditActionFilter, number> = { ALL: auditEvents?.length ?? 0, SIGNED: 0, REOPENED: 0, ROUTED: 0 };
+    for (const ev of auditEvents ?? []) {
+      if (ev.action === "SIGNED") c.SIGNED++;
+      else if (ev.action === "REOPENED") c.REOPENED++;
+      else if (ev.action === "ROUTED") c.ROUTED++;
+    }
+    return c;
+  }, [auditEvents]);
+
+  const filteredAudit = useMemo(
+    () => (auditEvents ?? []).filter((ev) => auditFilter === "ALL" || ev.action === auditFilter),
+    [auditEvents, auditFilter]
+  );
+
   // search + sort pipeline over the active lane's rows
   const visibleRows = useMemo(() => {
     let list = rows ?? [];
+    if (dayKey !== "all") list = list.filter((r) => dayKeyOf(r.created_at) === dayKey);
     const q = query.trim().toUpperCase();
     if (q) list = list.filter((r) => r.patient_id.toUpperCase().includes(q));
     if (sortKey) {
@@ -587,7 +652,7 @@ export default function DashboardView() {
       });
     }
     return list;
-  }, [rows, query, sortKey, sortDir]);
+  }, [rows, query, sortKey, sortDir, dayKey]);
 
   const handleSort = useCallback(
     (key: SortKey) => {
@@ -653,7 +718,7 @@ export default function DashboardView() {
       const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "AUTO_CLEARED", reviewed_by: "Dr. Review (dashboard demo)" }),
+        body: JSON.stringify({ status: "AUTO_CLEARED", reviewed_by: `${doctor}${DEMO_SIGNER_SUFFIX}` }),
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
@@ -692,7 +757,7 @@ export default function DashboardView() {
                   at: new Date().toISOString(),
                   action: "SIGNED",
                   by: data.reviewed_by,
-                  note: `Signed off by ${data.reviewed_by}`,
+                  note: `Signed off by ${doctor}`,
                   status: "AUTO_CLEARED",
                 }),
               },
@@ -725,8 +790,8 @@ export default function DashboardView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           status: previousStatus,
-          reviewed_by: "Dr. Review (dashboard demo)",
-          note: `Sign-off reopened by Dr. Review — case returned to the ${previousStatus === "URGENT" ? "urgent" : "review"} queue`,
+          reviewed_by: `${doctor}${DEMO_SIGNER_SUFFIX}`,
+          note: `Sign-off reopened by ${doctor} — case returned to the ${previousStatus === "URGENT" ? "urgent" : "review"} queue`,
         }),
       });
       if (!res.ok) {
@@ -759,8 +824,8 @@ export default function DashboardView() {
                 audit_log: appendAuditEvent(prev.details.audit_log, {
                   at: new Date().toISOString(),
                   action: "REOPENED",
-                  by: "Dr. Review (dashboard demo)",
-                  note: `Sign-off reopened by Dr. Review — case returned to the ${previousStatus === "URGENT" ? "urgent" : "review"} queue`,
+                  by: `${doctor}${DEMO_SIGNER_SUFFIX}`,
+                  note: `Sign-off reopened by ${doctor} — case returned to the ${previousStatus === "URGENT" ? "urgent" : "review"} queue`,
                   status: previousStatus,
                 }),
               },
@@ -789,7 +854,7 @@ export default function DashboardView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patient_ids: ids,
-          reviewed_by: "Dr. Review (dashboard demo)",
+          reviewed_by: `${doctor}${DEMO_SIGNER_SUFFIX}`,
           ...(bulkNote.trim() ? { note: bulkNote.trim().slice(0, 400) } : {}),
         }),
       });
@@ -860,7 +925,10 @@ export default function DashboardView() {
   }
 
   function handleRegisterPdf() {
-    const signedRows = (allRows ?? []).filter((r) => r.reviewed_by);
+    // respect the active camp-day filter — a day-scoped register stays day-scoped on paper
+    const signedRows = (allRows ?? []).filter(
+      (r) => r.reviewed_by && (dayKey === "all" || dayKeyOf(r.created_at) === dayKey)
+    );
     if (signedRows.length === 0) {
       toast.info(t("dash.toast.noSigned"));
       return;
@@ -895,6 +963,13 @@ export default function DashboardView() {
       <div className="print-only mb-4 border-b-2 border-black pb-3 text-black">
         <p className="text-xl font-bold">{t("dash.print.title")}</p>
         <p className="text-sm">{t("dash.print.generated", { date: new Date().toLocaleString() })}</p>
+        {dayKey !== "all" && campDays.length > 1 && (() => {
+          const day = campDays.find((d) => d.key === dayKey);
+          if (!day) return null;
+          const label = `${t("dash.day.tab", { n: day.day })} · ${new Date(day.key + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+          return <p className="text-sm font-semibold">{t("dash.day.print", { day: label })}</p>;
+        })()}
+        <p className="text-sm">{t("dash.print.doctor", { name: doctor })}</p>
       </div>
       <SectionHeading
         className="print:hidden"
@@ -1064,6 +1139,38 @@ export default function DashboardView() {
           })}
           </div>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+            {/* reviewing doctor identity — recorded as the signer on every sign-off */}
+            <Select
+              value={doctor}
+              onValueChange={(v) => {
+                setDoctor(v);
+                try {
+                  window.localStorage.setItem(DOCTOR_STORAGE_KEY, v);
+                } catch {
+                  /* private mode — in-memory only */
+                }
+              }}
+            >
+              <SelectTrigger
+                aria-label={t("dash.doctor.label")}
+                title={t("dash.doctor.title")}
+                className="h-11 w-full gap-2 rounded-lg border-white/15 bg-white/[0.03] text-sm text-foreground transition-colors hover:border-[#22D3EE]/40 focus-visible:border-[#22D3EE]/50 focus-visible:ring-[#22D3EE]/25 data-[state=open]:border-[#22D3EE]/50 sm:w-[15.5rem]"
+              >
+                <Stethoscope className="h-4 w-4 shrink-0 text-[#22D3EE]" aria-hidden="true" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="border-white/15 bg-[#0B1526]/95 text-foreground backdrop-blur-xl">
+                {DOCTOR_ROSTER.map((name) => (
+                  <SelectItem
+                    key={name}
+                    value={name}
+                    className="text-sm focus:bg-[#22D3EE]/10 focus:text-[#22D3EE]"
+                  >
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <div className="relative w-full sm:w-60">
               <Search
                 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -1136,6 +1243,53 @@ export default function DashboardView() {
             Showing <span className="tabular font-semibold text-[#22D3EE]">{visibleRows.length}</span> of{" "}
             <span className="tabular">{rows.length}</span> cases in this lane matching “{query.trim()}”
           </p>
+        )}
+        {/* camp-day register filter — one chip per screening day in the register */}
+        {campDays.length > 1 && (
+          <div
+            className="drishti-scroll -mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1"
+            role="group"
+            aria-label={t("dash.day.group")}
+          >
+            {([
+              { key: "all", day: 0, count: (allRows ?? []).length },
+              ...campDays,
+            ] as Array<{ key: string; day: number; count: number }>).map((d) => {
+              const active = dayKey === d.key;
+              const isAll = d.key === "all";
+              const full = isAll
+                ? null
+                : new Date(d.key + "T00:00:00").toLocaleDateString("en-GB", {
+                    weekday: "short", day: "numeric", month: "short", year: "numeric",
+                  });
+              return (
+                <button
+                  key={d.key}
+                  type="button"
+                  onClick={() => setDayKey(d.key)}
+                  aria-pressed={active}
+                  title={full ? `Camp day ${d.day} — ${full} · ${d.count} case${d.count === 1 ? "" : "s"}` : `${t("dash.day.all")} · ${d.count} case${d.count === 1 ? "" : "s"}`}
+                  className={cn(
+                    "flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs",
+                    active
+                      ? "border-[#22D3EE]/45 bg-[#22D3EE]/12 text-[#22D3EE] shadow-[0_0_14px_rgba(34,211,238,0.14)]"
+                      : "border-white/10 bg-white/[0.03] text-muted-foreground hover:border-white/25 hover:text-foreground"
+                  )}
+                >
+                  {isAll && <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />}
+                  {isAll ? t("dash.day.all") : t("dash.day.tab", { n: d.day })}
+                  <span
+                    className={cn(
+                      "tabular rounded-full px-1.5 py-px text-[9.5px] font-semibold",
+                      active ? "bg-[#22D3EE]/20 text-[#22D3EE]" : "bg-white/5 text-muted-foreground"
+                    )}
+                  >
+                    {allRows ? d.count : "·"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         )}
       </Reveal>
 
@@ -1446,6 +1600,48 @@ export default function DashboardView() {
             </button>
           </div>
 
+          {/* decision-type filter chips (SIGNED / REOPENED / ROUTED) */}
+          {auditEvents && auditEvents.length > 0 && (
+            <div
+              className="mt-4 flex flex-wrap items-center gap-1.5"
+              role="group"
+              aria-label={t("dash.activity.filterGroup")}
+            >
+              {([
+                { key: "ALL", label: t("dash.activity.all") },
+                { key: "SIGNED", label: t("dash.activity.signed") },
+                { key: "REOPENED", label: t("dash.activity.reopened") },
+                { key: "ROUTED", label: t("dash.activity.routed") },
+              ] as Array<{ key: AuditActionFilter; label: string }>).map((f) => {
+                const active = auditFilter === f.key;
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setAuditFilter(f.key)}
+                    aria-pressed={active}
+                    className={cn(
+                      "flex min-h-8 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      active
+                        ? "border-[#22D3EE]/45 bg-[#22D3EE]/12 text-[#22D3EE] shadow-[0_0_12px_rgba(34,211,238,0.15)]"
+                        : "border-white/10 bg-white/[0.03] text-muted-foreground hover:border-white/25 hover:text-foreground"
+                    )}
+                  >
+                    {f.label}
+                    <span
+                      className={cn(
+                        "tabular rounded-full px-1.5 py-px text-[9.5px] font-semibold",
+                        active ? "bg-[#22D3EE]/20 text-[#22D3EE]" : "bg-white/5 text-muted-foreground"
+                      )}
+                    >
+                      {auditCounts[f.key]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="drishti-scroll mt-4 max-h-96 overflow-y-auto pr-1">
             {auditError ? (
               <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
@@ -1472,9 +1668,14 @@ export default function DashboardView() {
                 <History className="h-6 w-6 text-[#22D3EE]/50" aria-hidden="true" />
                 <p className="text-sm text-muted-foreground">{t("dash.activity.empty")}</p>
               </div>
+            ) : filteredAudit.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+                <History className="h-5 w-5 text-muted-foreground/50" aria-hidden="true" />
+                <p className="text-sm text-muted-foreground">{t("dash.activity.noneMatch")}</p>
+              </div>
             ) : (
               <ol className="relative ml-3 space-y-1 border-l border-white/10 pl-6" aria-label={t("dash.activity.title")}>
-                {auditEvents.map((ev, i) => {
+                {filteredAudit.map((ev, i) => {
                   const meta =
                     ev.action === "SIGNED"
                       ? { icon: ShieldCheck, cls: "border-[#34D399]/50 bg-[#0A2E24] text-[#34D399]", label: t("dash.activity.signed") }
@@ -1523,9 +1724,24 @@ export default function DashboardView() {
               </ol>
             )}
           </div>
-          {!auditError && auditEvents && auditEvents.length > 0 && auditTotal > auditEvents.length && (
+          {!auditError && auditEvents && auditEvents.length > 0 && auditFilter === "ALL" && auditTotal > auditEvents.length && (
             <p className="mt-3 text-[11px] text-muted-foreground">
               {t("dash.activity.showing", { n: auditEvents.length, total: auditTotal })}
+            </p>
+          )}
+          {!auditError && auditEvents && auditEvents.length > 0 && auditFilter !== "ALL" && (
+            <p className="mt-3 text-[11px] text-muted-foreground" role="status">
+              {t("dash.activity.filtered", {
+                n: filteredAudit.length,
+                s: filteredAudit.length === 1 ? "" : "s",
+                type:
+                  auditFilter === "SIGNED"
+                    ? t("dash.activity.signed").toLowerCase()
+                    : auditFilter === "REOPENED"
+                      ? t("dash.activity.reopened").toLowerCase()
+                      : t("dash.activity.routed").toLowerCase(),
+                total: auditTotal || auditEvents.length,
+              })}
             </p>
           )}
         </GlassCard>
