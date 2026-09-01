@@ -54,6 +54,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { ICDR_CLASSES, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
+import { useLang } from "@/lib/i18n";
 import { downloadRegisterPdf, downloadReportPdf, type RegisterRow } from "@/lib/report-pdf";
 import { cn } from "@/lib/utils";
 
@@ -347,6 +348,7 @@ function ModalSkeleton() {
 
 export default function DashboardView() {
   const { navigate } = useNav();
+  const { t } = useLang();
 
   // full dataset (stats + tab counts)
   const [allRows, setAllRows] = useState<PatientRow[] | null>(null);
@@ -783,18 +785,19 @@ export default function DashboardView() {
   return (
     <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
       <SectionHeading
-        eyebrow="HUMAN-IN-THE-LOOP"
+        eyebrow={t("dash.eyebrow")}
         title={
           <>
-            Doctor Dashboard — <span className="text-glow-cyan">Review Queue</span>
+            {t("dash.title.a")}
+            <span className="text-glow-cyan">{t("dash.title.b")}</span>
           </>
         }
-        sub="HIGH-trust cases auto-clear. MODERATE cases wait for your sign-off. Urgent and DME cases jump the queue."
+        sub={t("dash.sub")}
       />
       <Reveal className="-mt-4 mb-10 flex justify-center">
         <span className="chip border-[#FBBF24]/40 bg-[#2A2210]/60 text-[#FBBF24]">
           <TriangleAlert className="h-3 w-3" aria-hidden="true" />
-          Demo data — simulated screening records
+          {t("dash.demoChip")}
         </span>
       </Reveal>
 
@@ -825,8 +828,8 @@ export default function DashboardView() {
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
             <StatCard
               icon={ScanEye}
-              label="Screened today"
-              sub="cases through the DRISHTI pipeline today"
+              label={t("dash.stats.screened")}
+              sub={t("dash.stats.screenedSub")}
               value={stats.screenedToday}
               valueClass="text-[#22D3EE]"
               iconClass="border-[#22D3EE]/30 bg-[#22D3EE]/10 text-[#22D3EE]"
@@ -834,8 +837,8 @@ export default function DashboardView() {
             />
             <StatCard
               icon={Crosshair}
-              label="Referable caught"
-              sub="grade ≥ Moderate NPDR · refer within 3-6 months"
+              label={t("dash.stats.referable")}
+              sub={t("dash.stats.referableSub")}
               value={stats.referable}
               valueClass="text-[#FBBF24]"
               iconClass="border-[#FBBF24]/30 bg-[#FBBF24]/10 text-[#FBBF24]"
@@ -843,8 +846,8 @@ export default function DashboardView() {
             />
             <StatCard
               icon={ClipboardList}
-              label="Review queue"
-              sub="MODERATE + URGENT awaiting doctor sign-off"
+              label={t("dash.stats.queue")}
+              sub={t("dash.stats.queueSub")}
               value={stats.queue}
               valueClass={stats.urgentCount > 0 ? "text-[#F87171]" : "text-[#FBBF24]"}
               iconClass={
@@ -856,11 +859,11 @@ export default function DashboardView() {
             />
             <StatCard
               icon={ShieldCheck}
-              label="Signed off"
+              label={t("dash.stats.signed")}
               sub={
                 stats.signedToday > 0
-                  ? `${stats.signedToday} approved today · closed in the register`
-                  : "cases approved by the reviewing doctor"
+                  ? `${stats.signedToday} ${t("dash.stats.signedToday")}`
+                  : t("dash.stats.signedSub")
               }
               value={stats.signedCount}
               valueClass="text-[#34D399]"
@@ -869,8 +872,8 @@ export default function DashboardView() {
             />
             <StatCard
               icon={Timer}
-              label="Avg processing time"
-              sub="gate → evidence → CNN → Grad-CAM → trust"
+              label={t("dash.stats.avg")}
+              sub={t("dash.stats.avgSub")}
               value={stats.avgSec}
               decimals={1}
               suffix="s"
@@ -886,15 +889,21 @@ export default function DashboardView() {
       <Reveal delay={0.1} className="mt-8">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
-          {FILTER_TABS.map((t) => {
-            const active = filter === t.key;
+          {FILTER_TABS.map((tab) => {
+            const active = filter === tab.key;
+            const label =
+              tab.key === "all" ? t("dash.tab.all")
+              : tab.key === "auto_cleared" ? t("dash.tab.auto")
+              : tab.key === "needs_review" ? t("dash.tab.review")
+              : tab.key === "urgent" ? t("dash.tab.urgent")
+              : t("dash.tab.rejected");
             return (
               <button
-                key={t.key}
+                key={tab.key}
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setFilter(t.key)}
+                onClick={() => setFilter(tab.key)}
                 className={cn(
                   "flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium transition-all duration-200 sm:text-sm",
                   active
@@ -902,16 +911,28 @@ export default function DashboardView() {
                     : "border-white/10 bg-white/[0.03] text-muted-foreground hover:border-white/20 hover:text-foreground"
                 )}
               >
-                {t.label}
+                {label}
                 <span
                   className={cn(
                     "tabular rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
                     active ? "bg-[#22D3EE]/20 text-[#22D3EE]" : "bg-white/5 text-muted-foreground"
                   )}
                 >
-                  {allRows ? counts[t.key] : "·"}
+                  {allRows ? counts[tab.key] : "·"}
                 </span>
-                {t.key === "auto_cleared" && allRows && signedAuto > 0 && (
+                {tab.key === "all" && allRows && (allRows ?? []).some((r) => r.reviewed_by) && (() => {
+                  const signedTotal = (allRows ?? []).filter((r) => r.reviewed_by).length;
+                  return (
+                    <span
+                      className="inline-flex items-center gap-0.5 rounded-full border border-[#34D399]/40 bg-[#0A2E24]/70 px-1.5 py-0.5 text-[10px] font-semibold text-[#34D399]"
+                      title={`${signedTotal} signed-off case${signedTotal === 1 ? "" : "s"} in the register`}
+                    >
+                      <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+                      {signedTotal}
+                    </span>
+                  );
+                })()}
+                {tab.key === "auto_cleared" && allRows && signedAuto > 0 && (
                   <span
                     className="inline-flex items-center gap-0.5 rounded-full border border-[#34D399]/40 bg-[#0A2E24]/70 px-1.5 py-0.5 text-[10px] font-semibold text-[#34D399]"
                     title={`${signedAuto} of these were signed off by the doctor`}
@@ -933,8 +954,8 @@ export default function DashboardView() {
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search patient ID…"
-                aria-label="Search cases by patient ID"
+                placeholder={t("dash.search")}
+                aria-label={t("dash.search")}
                 className="h-11 rounded-lg border-white/15 bg-white/[0.03] pl-9 pr-9 text-sm placeholder:text-muted-foreground/70 focus-visible:border-[#22D3EE]/50 focus-visible:ring-[#22D3EE]/25"
               />
               {query && (
@@ -955,16 +976,31 @@ export default function DashboardView() {
               title="Download a PDF register of every doctor-signed case"
             >
               <FileText className="h-4 w-4" aria-hidden="true" />
-              Register PDF
+              {t("dash.registerPdf")}
             </button>
             <a
-              href={`/api/patients/export?filter=${filter}`}
+              href={
+                selectedIds.length > 0
+                  ? `/api/patients/export?ids=${encodeURIComponent(selectedIds.join(","))}`
+                  : `/api/patients/export?filter=${filter}`
+              }
               download
-              className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
-              title="Download the current queue as a CSV register"
+              className={cn(
+                "flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border bg-white/[0.03] px-4 py-2 text-xs font-medium transition-all duration-200",
+                selectedIds.length > 0
+                  ? "border-[#34D399]/45 text-[#34D399] hover:border-[#34D399]/70"
+                  : "border-white/15 text-muted-foreground hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+              )}
+              title={
+                selectedIds.length > 0
+                  ? `Download the ${selectedIds.length} selected case${selectedIds.length === 1 ? "" : "s"} as CSV`
+                  : "Download the current queue as a CSV register"
+              }
             >
               <FileDown className="h-4 w-4" aria-hidden="true" />
-              Export CSV
+              {selectedIds.length > 0
+                ? `${t("dash.exportSelected")} (${selectedIds.length})`
+                : t("dash.exportCsv")}
             </a>
           </div>
         </div>
@@ -1183,7 +1219,7 @@ export default function DashboardView() {
                         title={`Signed off by ${r.reviewed_by}${r.reviewed_at ? ` · ${fmtDate(r.reviewed_at)}` : ""}`}
                       >
                         <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-                        Signed
+                        {t("dash.signedChip")}
                       </span>
                     )}
                     {r.dme_risk && (
@@ -1218,10 +1254,10 @@ export default function DashboardView() {
             </span>
             <div className="min-w-0 flex-1 sm:flex-none">
               <p className="tabular text-sm font-semibold leading-tight text-foreground">
-                {selectedIds.length} case{selectedIds.length === 1 ? "" : "s"} selected
+                {selectedIds.length} {selectedIds.length === 1 ? t("dash.bulk.selected") : t("dash.bulk.selectedPlural")}
               </p>
               <p className="truncate text-[11px] text-muted-foreground">
-                ready for bulk sign-off · approvals close in the register
+                {t("dash.bulk.ready")}
               </p>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -1231,7 +1267,7 @@ export default function DashboardView() {
                 onClick={() => setBulkConfirmOpen(true)}
               >
                 <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                Sign off all
+                {t("dash.bulk.signAll")}
               </Button>
               <Button
                 size="sm"
@@ -1429,7 +1465,7 @@ export default function DashboardView() {
                     onClick={() => downloadReportPdf(detailResult)}
                   >
                     <Download className="h-4 w-4" aria-hidden="true" />
-                    Download PDF
+                    {t("dash.pdf")}
                   </Button>
                   {isSignedOffHere && openId ? (
                     <span className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1449,7 +1485,7 @@ export default function DashboardView() {
                         disabled={signingOff === openId}
                       >
                         <Undo2 className="h-4 w-4" aria-hidden="true" />
-                        {signingOff === openId ? "Reopening…" : "Undo"}
+                        {signingOff === openId ? t("dash.reopening") : t("dash.undo")}
                       </Button>
                     </span>
                   ) : canSign && openId ? (
@@ -1459,7 +1495,7 @@ export default function DashboardView() {
                       disabled={signingOff === openId}
                     >
                       <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                      {signingOff === openId ? "Signing off…" : "Approve & sign-off"}
+                      {signingOff === openId ? t("dash.signingOff") : t("dash.signOff")}
                     </Button>
                   ) : null}
                 </div>

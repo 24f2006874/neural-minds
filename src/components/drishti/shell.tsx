@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LangToggle, useLang } from "@/lib/i18n";
 
 // ── View routing (SPA — the user sees only "/") ───────────────────────
 
@@ -122,6 +123,7 @@ export function DrishtiMark({ size = 30 }: { size?: number }) {
 function Header() {
   const { view, navigate } = useNav();
   const [open, setOpen] = useState(false);
+  const { t } = useLang();
 
   return (
     <header className="sticky top-0 z-50 border-b border-[#22D3EE]/12 bg-[#060B14]/80 backdrop-blur-xl">
@@ -147,7 +149,7 @@ function Header() {
                 view === n.key ? "text-[#22D3EE]" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {n.label}
+              {t(`nav.${n.key}`)}
               {view === n.key && (
                 <motion.span
                   layoutId="nav-underline"
@@ -160,17 +162,18 @@ function Header() {
         </nav>
 
         <div className="flex items-center gap-2">
+          <LangToggle className="hidden sm:block" />
           <button
             onClick={() => navigate("screening")}
             className="btn-glow-cyan hidden rounded-lg bg-[#22D3EE] px-4 py-2 font-display text-sm font-semibold text-[#04121c] transition-all sm:block"
           >
-            Launch Screening
+            {t("nav.launch")}
           </button>
           <button
             className="rounded-md border border-white/10 p-2 text-foreground lg:hidden"
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
-            aria-label="Toggle navigation menu"
+            aria-label={t("nav.menu")}
           >
             {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
@@ -202,18 +205,21 @@ function Header() {
                   )}
                 >
                   <n.icon className="h-4 w-4" />
-                  {n.label}
+                  {t(`nav.${n.key}`)}
                 </button>
               ))}
-              <button
-                onClick={() => {
-                  navigate("screening");
-                  setOpen(false);
-                }}
-                className="btn-glow-cyan mt-2 w-full rounded-lg bg-[#22D3EE] px-4 py-2.5 font-display text-sm font-semibold text-[#04121c]"
-              >
-                Launch Screening
-              </button>
+              <div className="flex items-center justify-between gap-2 px-3 pt-2">
+                <LangToggle />
+                <button
+                  onClick={() => {
+                    navigate("screening");
+                    setOpen(false);
+                  }}
+                  className="btn-glow-cyan flex-1 rounded-lg bg-[#22D3EE] px-4 py-2.5 font-display text-sm font-semibold text-[#04121c]"
+                >
+                  {t("nav.launch")}
+                </button>
+              </div>
             </div>
           </motion.nav>
         )}
@@ -226,6 +232,7 @@ function Header() {
 
 function Footer() {
   const { navigate } = useNav();
+  const { t } = useLang();
   return (
     <footer className="mt-auto border-t border-[#22D3EE]/12 bg-[#050910]/90 pb-[env(safe-area-inset-bottom)]">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-4">
@@ -248,7 +255,7 @@ function Footer() {
             {NAV_ITEMS.slice(1, 6).map((n) => (
               <li key={n.key}>
                 <button onClick={() => navigate(n.key)} className="text-muted-foreground transition-colors hover:text-[#22D3EE]">
-                  {n.label}
+                  {t(`nav.${n.key}`)}
                 </button>
               </li>
             ))}
@@ -288,7 +295,7 @@ function Footer() {
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-4 text-xs text-muted-foreground sm:flex-row sm:px-6">
           <span>© 2026 Team Neural Minds · SIH 2026 · PS 26038 (MathWorks)</span>
           <span className="flex items-center gap-2">
-            <span className="chip border-[#FBBF24]/30 text-[#FBBF24]">Demo data is simulated</span>
+            <span className="chip border-[#FBBF24]/30 text-[#FBBF24]">{t("footer.demoChip")}</span>
             <span className="chip border-[#22D3EE]/30 text-[#22D3EE]">v1.0.0-web</span>
           </span>
         </div>

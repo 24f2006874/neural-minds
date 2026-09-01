@@ -4,6 +4,7 @@ import { forwardRef, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { CaseStatus, TrustLevel } from "@/lib/drishti";
+import { useLang } from "@/lib/i18n";
 
 /** Glassmorphism card — the core surface of the design system. */
 export const GlassCard = forwardRef<HTMLDivElement, { children: ReactNode; className?: string; hover?: boolean }>(
@@ -84,7 +85,8 @@ const TRUST_STYLES: Record<TrustLevel, { chip: string; text: string; glow: strin
 /** Trust level chip — THE consistent trust color language (green/amber/red). */
 export function TrustChip({ level, className }: { level: TrustLevel; className?: string }) {
   const s = TRUST_STYLES[level];
-  const label = level === "HIGH" ? "TRUSTED" : level === "MODERATE" ? "REVIEW" : "URGENT";
+  const { t } = useLang();
+  const label = t(`trust.${level}`);
   return (
     <span className={cn("chip", s.chip, s.text, s.glow, className)}>
       <span className={cn("h-1.5 w-1.5 rounded-full", level === "HIGH" ? "bg-[#34D399]" : level === "MODERATE" ? "bg-[#FBBF24]" : "bg-[#F87171]")} />
@@ -94,14 +96,15 @@ export function TrustChip({ level, className }: { level: TrustLevel; className?:
 }
 
 export function StatusChip({ status, className }: { status: CaseStatus; className?: string }) {
-  const map: Record<CaseStatus, { label: string; cls: string }> = {
-    AUTO_CLEARED: { label: "Auto-cleared", cls: "border-[#34D399]/40 text-[#34D399]" },
-    NEEDS_REVIEW: { label: "Needs review", cls: "border-[#FBBF24]/40 text-[#FBBF24]" },
-    URGENT: { label: "Urgent", cls: "border-[#F87171]/40 text-[#F87171]" },
-    REJECTED: { label: "Rejected", cls: "border-white/25 text-muted-foreground" },
+  const map: Record<CaseStatus, { cls: string }> = {
+    AUTO_CLEARED: { cls: "border-[#34D399]/40 text-[#34D399]" },
+    NEEDS_REVIEW: { cls: "border-[#FBBF24]/40 text-[#FBBF24]" },
+    URGENT: { cls: "border-[#F87171]/40 text-[#F87171]" },
+    REJECTED: { cls: "border-white/25 text-muted-foreground" },
   };
+  const { t } = useLang();
   const s = map[status];
-  return <span className={cn("chip", s.cls, className)}>{s.label}</span>;
+  return <span className={cn("chip", s.cls, className)}>{t(`status.${status}`)}</span>;
 }
 
 export function TrustToneText({ level, children, className }: { level: TrustLevel; children: ReactNode; className?: string }) {

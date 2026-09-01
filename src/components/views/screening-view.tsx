@@ -33,6 +33,7 @@ import {
   type ScreeningResult,
 } from "@/lib/drishti";
 import { downloadReportPdf } from "@/lib/report-pdf";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type Phase = "idle" | "running" | "done" | "rejected" | "error";
@@ -215,6 +216,7 @@ function ReferralTimeline({ res }: { res: ScreeningResult }) {
 }
 
 export default function ScreeningView() {
+  const { t } = useLang();
   const [patientId, setPatientId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -402,9 +404,14 @@ export default function ScreeningView() {
     <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12">
       <SectionHeading
         align="left"
-        eyebrow="LIVE SCREENING"
-        title="Upload a retina. Watch DRISHTI think."
-        sub="Quality gate → evidence → grading → Grad-CAM → trust routing — every stage animates exactly like the real console."
+        eyebrow={t("screen.eyebrow")}
+        title={
+          <>
+            {t("screen.title.a")}
+            <span className="text-glow-cyan">{t("screen.title.b")}</span>
+          </>
+        }
+        sub={t("screen.sub")}
       />
 
       <div className="grid gap-6 lg:grid-cols-[380px_1fr] lg:items-start">
