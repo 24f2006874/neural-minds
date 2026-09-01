@@ -17,6 +17,7 @@ import {
   CalendarClock,
   Camera,
   Gauge,
+  Layers,
   Scale,
   ShieldCheck,
   Sparkles,
@@ -48,6 +49,13 @@ const GREEN = "#34D399";
 const AMBER = "#FBBF24";
 const RED = "#F87171";
 const AXIS = "#8296B3";
+
+/** Dashed comparison-curve colors for the district-scaling chart overlay. */
+const PRESET_COMPARE_COLORS: Record<PresetKey, string> = {
+  phc: "#8296B3",
+  district: "#FBBF24",
+  state: "#34D399",
+};
 
 /** API returns 999 min when the queue is infinite (wq → ∞). */
 const UNBOUNDED_WAIT = 900;
@@ -195,16 +203,41 @@ export default function CapacityView() {
   const [arr, setArr] = useState(25);
   const [dragging, setDragging] = useState(false);
   const [remote, setRemote] = useState<{ key: string; payload: CapacityApiPayload } | null>(null);
+  const [compare, setCompare] = useState(false);
   const reduce = useReducedMotion() ?? false;
 
   // Instant local math — same computeCapacity the API route calls server-side.
   const local = useMemo(() => computeCapacity({ cams, revw, arr }), [cams, revw, arr]);
   const localScaling = useMemo(() => districtScaling(cams, revw, arr), [cams, revw, arr]);
 
+  // Preset comparison curves (computed once — presets are constants).
+  const presetCurves = useMemo(() => {
+    const curves = {} as Record<PresetKey, ScalingPoint[]>;
+    (Object.keys(CAPACITY_PRESETS) as PresetKey[]).forEach((k) => {
+      const p = CAPACITY_PRESETS[k];
+      curves[k] = districtScaling(p.cams, p.revw, p.arr);
+    });
+    return curves;
+  }, []);
+
   // Show API numbers once they match the current knobs; local math covers the gap.
   const cacheKey = `${cams}-${revw}-${arr}`;
   const out = remote && remote.key === cacheKey ? remote.payload.output : local;
   const scaling = remote && remote.key === cacheKey ? remote.payload.scaling : localScaling;
+
+  // Chart data: current-config series, plus one dashed series per preset when comparing.
+  const chartData = useMemo(() => {
+    const base = scaling.map((s) => ({ districts: s.districts, mine: s.patientsPerYear }));
+    if (compare) {
+      (Object.keys(CAPACITY_PRESETS) as PresetKey[]).forEach((k) => {
+        const curve = presetCurves[k];
+        base.forEach((row, i) => {
+          (row as Record<string, number>)[`p_${k}`] = curve[i]?.patientsPerYear ?? 0;
+        });
+      });
+    }
+    return base;
+  }, [scaling, compare, presetCurves]);
 
   // Debounced (~150 ms) hydration from GET /api/capacity.
   useEffect(() => {
@@ -562,14 +595,31 @@ export default function CapacityView() {
                 Scaling the district pilot: the same deployment replicated across a state.
               </p>
             </div>
-            <span className="chip border-[#22D3EE]/40 text-[#22D3EE]">
-              {to100k.districts} district{to100k.districts === 1 ? "" : "s"} → ~
-              {to100k.patientsPerYear.toLocaleString("en-IN")} patients / year
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCompare((c) => !c)}
+                aria-pressed={compare}
+                title="Overlay the three preset deployment curves on this chart"
+                className={cn(
+                  "flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  compare
+                    ? "border-[#22D3EE]/50 bg-[#22D3EE]/15 text-[#22D3EE] shadow-[0_0_14px_rgba(34,211,238,0.15)]"
+                    : "border-white/10 bg-white/[0.03] text-muted-foreground hover:border-[#22D3EE]/30 hover:text-foreground"
+                )}
+              >
+                <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+                Compare presets
+              </button>
+              <span className="chip border-[#22D3EE]/40 text-[#22D3EE]">
+                {to100k.districts} district{to100k.districts === 1 ? "" : "s"} → ~
+                {to100k.patientsPerYear.toLocaleString("en-IN")} patients / year
+              </span>
+            </div>
           </div>
           <div className="mt-4 h-60 sm:h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={scaling} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="capScalingFill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={CYAN} stopOpacity={0.35} />
@@ -601,16 +651,50 @@ export default function CapacityView() {
                 />
                 <Area
                   type="monotone"
-                  dataKey="patientsPerYear"
-                  name="Patients / year"
+                  dataKey="mine"
+                  name="Your config"
                   stroke={CYAN}
                   strokeWidth={2}
                   fill="url(#capScalingFill)"
                   activeDot={{ r: 4, fill: CYAN, stroke: "#060B14" }}
                 />
+                {compare &&
+                  (Object.keys(CAPACITY_PRESETS) as PresetKey[]).map((k) => (
+                    <Area
+                      key={k}
+                      type="monotone"
+                      dataKey={`p_${k}`}
+                      name={CAPACITY_PRESETS[k].label}
+                      stroke={PRESET_COMPARE_COLORS[k]}
+                      strokeWidth={1.6}
+                      strokeDasharray="5 4"
+                      fill="none"
+                      dot={false}
+                      activeDot={{ r: 3, fill: PRESET_COMPARE_COLORS[k], stroke: "#060B14" }}
+                    />
+                  ))}
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          {compare && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="Scaling chart legend">
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                <span className="h-[3px] w-5 rounded-full" style={{ background: CYAN }} aria-hidden="true" />
+                Your config
+              </span>
+              {(Object.keys(CAPACITY_PRESETS) as PresetKey[]).map((k) => (
+                <span key={k} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span
+                    className="h-0 w-5 border-t-2 border-dashed"
+                    style={{ borderColor: PRESET_COMPARE_COLORS[k] }}
+                    aria-hidden="true"
+                  />
+                  {CAPACITY_PRESETS[k].label} · {CAPACITY_PRESETS[k].cams}·{CAPACITY_PRESETS[k].revw}·
+                  {CAPACITY_PRESETS[k].arr}
+                </span>
+              ))}
+            </div>
+          )}
         </GlassCard>
       </Reveal>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { jsPDF } from "jspdf";
-import type { ScreeningResult } from "@/lib/drishti";
+import type { ScreeningResult, TrustLevel } from "@/lib/drishti";
 import { ICDR_CLASSES, VALIDATED_METRICS } from "@/lib/drishti";
 
 /**
@@ -135,4 +135,177 @@ export function downloadReportPdf(result: ScreeningResult) {
   honesty.forEach((h, i) => doc.text(h, M, 274 + i * 4.5));
 
   doc.save(`DRISHTI-report-${result.patient_id}.pdf`);
+}
+
+// ────────────────────────────────────────────────────────────
+// Day-register PDF — batch export of doctor-signed cases
+// ────────────────────────────────────────────────────────────
+
+export interface RegisterRow {
+  patient_id: string;
+  created_at: string;
+  grade: string;
+  class_level: number;
+  confidence: number;
+  trust_level: TrustLevel;
+  status: string;
+  dme_risk: boolean;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+}
+
+/**
+ * Screening register PDF — one page per ~28 signed cases: summary header,
+ * a per-case table (grade / trust / confidence / signer), referral mix and
+ * the honesty footer. Built from the dashboard's signed-off rows.
+ */
+export function downloadRegisterPdf(rows: RegisterRow[]) {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const W = 210;
+  const M = 16;
+
+  const trustColor = (t: TrustLevel) =>
+    t === "HIGH" ? "#17A06C" : t === "MODERATE" ? "#B7791F" : "#C0392B";
+  const fmt = (iso?: string | null) => {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleString("en-US", {
+        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+      });
+    } catch {
+      return "—";
+    }
+  };
+
+  const pages = Math.max(1, Math.ceil(rows.length / 24));
+  let page = 0;
+  let y = 0;
+
+  const newPage = () => {
+    if (page > 0) doc.addPage();
+    page++;
+    // Header band
+    doc.setFillColor(6, 11, 20);
+    doc.rect(0, 0, W, 24, "F");
+    doc.setTextColor(34, 211, 238);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text("DRISHTI", M, 11);
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(160, 190, 215);
+    doc.text("Screening Register — doctor-signed cases", M, 17.5);
+    doc.text(`Page ${page}/${pages}`, W - M, 11, { align: "right" });
+    doc.text(new Date().toLocaleString(), W - M, 17.5, { align: "right" });
+    y = 34;
+  };
+
+  newPage();
+
+  // Summary block (first page only)
+  const referable = rows.filter((r) => r.class_level >= 2).length;
+  const urgent = rows.filter((r) => r.trust_level === "LOW" || r.dme_risk).length;
+  const dme = rows.filter((r) => r.dme_risk).length;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(30, 40, 55);
+  doc.text(`${rows.length} signed case${rows.length === 1 ? "" : "s"} in this register`, M, y);
+  y += 6.5;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(80, 95, 115);
+  doc.text(
+    `Referable (grade ≥ Moderate NPDR): ${referable}   ·   Urgent-flagged (LOW trust or DME): ${urgent}   ·   DME risk: ${dme}`,
+    M,
+    y
+  );
+  y += 9;
+
+  // Table header
+  const cols = { id: M, date: M + 34, grade: M + 66, conf: M + 106, trust: M + 124, signed: M + 146 };
+  doc.setFillColor(240, 246, 252);
+  doc.roundedRect(M - 3, y - 4.5, W - 2 * M + 6, 7, 1.5, 1.5, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(60, 75, 95);
+  doc.text("PATIENT", cols.id, y);
+  doc.text("SCREENED", cols.date, y);
+  doc.text("GRADE", cols.grade, y);
+  doc.text("CONF", cols.conf, y);
+  doc.text("TRUST", cols.trust, y);
+  doc.text("SIGNED BY / AT", cols.signed, y);
+  y += 7;
+
+  const rowLine = (r: RegisterRow) => {
+    if (y > 262) {
+      newPage();
+      // repeat column headers after a page break
+      doc.setFillColor(240, 246, 252);
+      doc.roundedRect(M - 3, y - 4.5, W - 2 * M + 6, 7, 1.5, 1.5, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(60, 75, 95);
+      doc.text("PATIENT", cols.id, y);
+      doc.text("SCREENED", cols.date, y);
+      doc.text("GRADE", cols.grade, y);
+      doc.text("CONF", cols.conf, y);
+      doc.text("TRUST", cols.trust, y);
+      doc.text("SIGNED BY / AT", cols.signed, y);
+      y += 7;
+    }
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.6);
+    doc.setTextColor(30, 40, 55);
+    doc.text(doc.splitTextToSize(r.patient_id, 30)[0], cols.id, y);
+    doc.setTextColor(95, 110, 130);
+    doc.text(fmt(r.created_at), cols.date, y);
+    doc.text(r.grade || "—", cols.grade, y);
+    doc.text(`${(r.confidence * 100).toFixed(0)}%`, cols.conf, y);
+    doc.setTextColor(trustColor(r.trust_level).replace("#", ""));
+    doc.text(r.trust_level, cols.trust, y);
+    doc.setTextColor(60, 75, 95);
+    const signer = (r.reviewed_by ?? "—").split(" (")[0];
+    const signedTxt = r.reviewed_at ? `${signer} · ${fmt(r.reviewed_at)}` : signer;
+    doc.text(doc.splitTextToSize(signedTxt, 56)[0], cols.signed, y);
+    y += 6;
+    doc.setDrawColor(228, 234, 242);
+    doc.setLineWidth(0.2);
+    doc.line(M, y - 2.6, W - M, y - 2.6);
+  };
+
+  rows.forEach(rowLine);
+
+  // Referral guidance footer
+  if (y > 236) newPage();
+  y += 6;
+  doc.setDrawColor(220, 228, 238);
+  doc.line(M, y, W - M, y);
+  y += 6;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(30, 40, 55);
+  doc.text("Referral guidance (ICDR)", M, y);
+  y += 4.6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.8);
+  doc.setTextColor(110, 125, 145);
+  ICDR_CLASSES.filter((c) => c.level >= 0)
+    .slice(0, 5)
+    .forEach((c) => {
+      const short = c.short ? `${c.short} — ` : "";
+      doc.text(doc.splitTextToSize(`• ${short}${c.action}`, 170), M, y);
+      y += 4.2;
+    });
+
+  // Honesty block
+  doc.setFontSize(7.5);
+  doc.setTextColor(120, 135, 155);
+  const honesty = [
+    `Model: sensitivity ${VALIDATED_METRICS.sensitivity}% · specificity ${VALIDATED_METRICS.specificity}% · QWK ${VALIDATED_METRICS.qwk} · AUC ${VALIDATED_METRICS.auc} (${VALIDATED_METRICS.dataset}).`,
+    "Research prototype — not a certified clinical device. AI grading assists; every signed case above was approved by the reviewing doctor.",
+    "Team Neural Minds · SIH 2026 · PS 26038 (MathWorks)",
+  ];
+  honesty.forEach((h, i) => doc.text(doc.splitTextToSize(h, 178), M, 274 + i * 4.4));
+
+  doc.save(`DRISHTI-register-${new Date().toISOString().slice(0, 10)}.pdf`);
 }

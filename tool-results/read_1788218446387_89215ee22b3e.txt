@@ -1,0 +1,637 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useMemo, useState } from "react";
+     4→import { motion, useReducedMotion } from "framer-motion";
+     5→import {
+     6→  Area,
+     7→  AreaChart,
+     8→  CartesianGrid,
+     9→  ReferenceLine,
+    10→  ResponsiveContainer,
+    11→  Tooltip as RTooltip,
+    12→  XAxis,
+    13→  YAxis,
+    14→} from "recharts";
+    15→import {
+    16→  ArrowRight,
+    17→  CalendarClock,
+    18→  Camera,
+    19→  Gauge,
+    20→  Scale,
+    21→  ShieldCheck,
+    22→  Sparkles,
+    23→  Stethoscope,
+    24→  Timer,
+    25→  TriangleAlert,
+    26→} from "lucide-react";
+    27→import { AnimatedNumber } from "@/components/drishti/animated-number";
+    28→import { DarkTip } from "@/components/drishti/chart-frame";
+    29→import { GlassCard, Reveal, SectionHeading } from "@/components/drishti/primitives";
+    30→import { Slider } from "@/components/ui/slider";
+    31→import {
+    32→  CAPACITY_PARAMS,
+    33→  CAPACITY_PRESETS,
+    34→  computeCapacity,
+    35→  districtScaling,
+    36→  type CapacityOutput,
+    37→} from "@/lib/drishti";
+    38→import { cn } from "@/lib/utils";
+    39→
+    40→// ────────────────────────────────────────────────────────────
+    41→// Capacity Planner — PAGE 6
+    42→// Local M/M/c math (same lib the API route uses) gives instant
+    43→// feedback; GET /api/capacity hydrates the canonical numbers.
+    44→// ────────────────────────────────────────────────────────────
+    45→
+    46→const CYAN = "#22D3EE";
+    47→const GREEN = "#34D399";
+    48→const AMBER = "#FBBF24";
+    49→const RED = "#F87171";
+    50→const AXIS = "#8296B3";
+    51→
+    52→/** API returns 999 min when the queue is infinite (wq → ∞). */
+    53→const UNBOUNDED_WAIT = 900;
+    54→
+    55→type ScalingPoint = { districts: number; patientsPerYear: number };
+    56→type PresetKey = keyof typeof CAPACITY_PRESETS;
+    57→type Tone = { text: string; chip: string };
+    58→
+    59→interface CapacityApiPayload {
+    60→  output: CapacityOutput;
+    61→  scaling: ScalingPoint[];
+    62→}
+    63→
+    64→function clamp(v: number, lo: number, hi: number) {
+    65→  return Math.min(hi, Math.max(lo, v));
+    66→}
+    67→
+    68→/** Trust-color load scale: green ≤75 · amber 75–90 · red >90. */
+    69→function loadTone(pct: number): Tone {
+    70→  if (pct > 90) return { text: "text-[#F87171] text-glow-red", chip: "border-[#F87171]/40 text-[#F87171]" };
+    71→  if (pct > 75) return { text: "text-[#FBBF24]", chip: "border-[#FBBF24]/40 text-[#FBBF24]" };
+    72→  return { text: "text-[#34D399]", chip: "border-[#34D399]/40 text-[#34D399]" };
+    73→}
+    74→
+    75→/** Wait scale: green ≤15 min · amber >30 · red >60 (or unbounded). */
+    76→function waitTone(min: number): Tone {
+    77→  if (min >= UNBOUNDED_WAIT || min > 60)
+    78→    return { text: "text-[#F87171] text-glow-red", chip: "border-[#F87171]/40 text-[#F87171]" };
+    79→  if (min > 30) return { text: "text-[#FBBF24]", chip: "border-[#FBBF24]/40 text-[#FBBF24]" };
+    80→  if (min <= 15) return { text: "text-[#34D399]", chip: "border-[#34D399]/40 text-[#34D399]" };
+    81→  return { text: "text-[#22D3EE]", chip: "border-[#22D3EE]/40 text-[#22D3EE]" };
+    82→}
+    83→
+    84→/** Decorative flow dots — travel left → right, speed set by `duration`. */
+    85→function FlowDots({
+    86→  count,
+    87→  duration,
+    88→  color,
+    89→  reduced,
+    90→}: {
+    91→  count: number;
+    92→  duration: number;
+    93→  color: string;
+    94→  reduced: boolean;
+    95→}) {
+    96→  const dots = Array.from({ length: count }, (_, i) => i);
+    97→  if (reduced) {
+    98→    return (
+    99→      <>
+   100→        {dots.map((i) => (
+   101→          <span
+   102→            key={i}
+   103→            className="absolute h-1.5 w-1.5 rounded-full"
+   104→            style={{
+   105→              top: "calc(50% - 3px)",
+   106→              left: `${count > 1 ? 8 + (i * 84) / (count - 1) : 46}%`,
+   107→              background: color,
+   108→              opacity: 0.55,
+   109→            }}
+   110→          />
+   111→        ))}
+   112→      </>
+   113→    );
+   114→  }
+   115→  return (
+   116→    <>
+   117→      {dots.map((i) => (
+   118→        <motion.span
+   119→          key={i}
+   120→          className="absolute h-1.5 w-1.5 rounded-full"
+   121→          style={{ top: "calc(50% - 3px)", background: color, boxShadow: `0 0 8px ${color}` }}
+   122→          initial={{ left: "-3%" }}
+   123→          animate={{ left: "103%" }}
+   124→          transition={{ duration, repeat: Infinity, ease: "linear", delay: (i * duration) / count }}
+   125→        />
+   126→      ))}
+   127→    </>
+   128→  );
+   129→}
+   130→
+   131→/** Slider row: label + hint, big tabular value chip, shadcn slider. */
+   132→function Knob({
+   133→  label,
+   134→  hint,
+   135→  value,
+   136→  min,
+   137→  max,
+   138→  onChange,
+   139→  onDragStart,
+   140→}: {
+   141→  label: string;
+   142→  hint: string;
+   143→  value: number;
+   144→  min: number;
+   145→  max: number;
+   146→  onChange: (v: number) => void;
+   147→  onDragStart: () => void;
+   148→}) {
+   149→  return (
+   150→    <div>
+   151→      <div className="mb-2 flex items-end justify-between gap-3">
+   152→        <div className="min-w-0">
+   153→          <p className="truncate text-sm font-medium text-foreground">{label}</p>
+   154→          <p className="text-[11px] text-muted-foreground">{hint}</p>
+   155→        </div>
+   156→        <span className="tabular shrink-0 rounded-lg border border-[#22D3EE]/30 bg-[#22D3EE]/10 px-2.5 py-1 font-display text-xl font-bold leading-none text-[#22D3EE]">
+   157→          {value}
+   158→        </span>
+   159→      </div>
+   160→      <Slider
+   161→        min={min}
+   162→        max={max}
+   163→        step={1}
+   164→        value={[value]}
+   165→        onValueChange={(v) => onChange(v[0])}
+   166→        onPointerDown={onDragStart}
+   167→        aria-label={label}
+   168→        className="[&_[data-slot=slider-thumb]]:size-5 [&_[data-slot=slider-thumb]]:border-[#22D3EE] [&_[data-slot=slider-thumb]]:shadow-[0_0_12px_rgba(34,211,238,0.45)]"
+   169→      />
+   170→      <div className="mt-1.5 flex justify-between text-[10px] font-medium text-muted-foreground">
+   171→        <span className="tabular">{min}</span>
+   172→        <span className="tabular">{max}</span>
+   173→      </div>
+   174→    </div>
+   175→  );
+   176→}
+   177→
+   178→// The scaling-chart tooltip is the shared DarkTip primitive (chart-frame.tsx),
+   179→// configured below for district labels + locale-formatted patient counts.
+   180→const scalingTipContent = (
+   181→  <DarkTip
+   182→    labelFormatter={(label) => `${label} district${Number(label) === 1 ? "" : "s"}`}
+   183→    valueFormatter={(v) => v.toLocaleString("en-IN")}
+   184→  />
+   185→);
+   186→
+   187→// ────────────────────────────────────────────────────────────
+   188→// View
+   189→// ────────────────────────────────────────────────────────────
+   190→
+   191→export default function CapacityView() {
+   192→  // Knobs — defaults mirror the "District pilot" preset.
+   193→  const [cams, setCams] = useState(3);
+   194→  const [revw, setRevw] = useState(2);
+   195→  const [arr, setArr] = useState(25);
+   196→  const [dragging, setDragging] = useState(false);
+   197→  const [remote, setRemote] = useState<{ key: string; payload: CapacityApiPayload } | null>(null);
+   198→  const reduce = useReducedMotion() ?? false;
+   199→
+   200→  // Instant local math — same computeCapacity the API route calls server-side.
+   201→  const local = useMemo(() => computeCapacity({ cams, revw, arr }), [cams, revw, arr]);
+   202→  const localScaling = useMemo(() => districtScaling(cams, revw, arr), [cams, revw, arr]);
+   203→
+   204→  // Show API numbers once they match the current knobs; local math covers the gap.
+   205→  const cacheKey = `${cams}-${revw}-${arr}`;
+   206→  const out = remote && remote.key === cacheKey ? remote.payload.output : local;
+   207→  const scaling = remote && remote.key === cacheKey ? remote.payload.scaling : localScaling;
+   208→
+   209→  // Debounced (~150 ms) hydration from GET /api/capacity.
+   210→  useEffect(() => {
+   211→    const ctrl = new AbortController();
+   212→    const t = setTimeout(() => {
+   213→      fetch(`/api/capacity?cams=${cams}&revw=${revw}&arr=${arr}`, { signal: ctrl.signal })
+   214→        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`/api/capacity ${res.status}`))))
+   215→        .then((json: CapacityApiPayload) => {
+   216→          setRemote({ key: `${cams}-${revw}-${arr}`, payload: json });
+   217→        })
+   218→        .catch(() => {
+   219→          /* local math already rendered — keep it */
+   220→        });
+   221→    }, 150);
+   222→    return () => {
+   223→      clearTimeout(t);
+   224→      ctrl.abort();
+   225→    };
+   226→  }, [cams, revw, arr]);
+   227→
+   228→  // End of drag → AnimatedNumber settles with an eased count-up.
+   229→  useEffect(() => {
+   230→    if (!dragging) return;
+   231→    const stop = () => setDragging(false);
+   232→    window.addEventListener("pointerup", stop);
+   233→    window.addEventListener("pointercancel", stop);
+   234→    return () => {
+   235→      window.removeEventListener("pointerup", stop);
+   236→      window.removeEventListener("pointercancel", stop);
+   237→    };
+   238→  }, [dragging]);
+   239→
+   240→  // Presets are derived: moving a knob off a preset lands on "Custom".
+   241→  const activePreset = (Object.keys(CAPACITY_PRESETS) as PresetKey[]).find(
+   242→    (k) => CAPACITY_PRESETS[k].cams === cams && CAPACITY_PRESETS[k].revw === revw && CAPACITY_PRESETS[k].arr === arr
+   243→  );
+   244→  const applyPreset = (k: PresetKey) => {
+   245→    const p = CAPACITY_PRESETS[k];
+   246→    setCams(p.cams);
+   247→    setRevw(p.revw);
+   248→    setArr(p.arr);
+   249→  };
+   250→
+   251→  // Derived visual params.
+   252→  const overloaded = out.utilizationPct >= 100;
+   253→  const arrDur = clamp(75 / arr, 1.2, 4.5); // arrivals flow: faster when arr higher
+   254→  const captureCap = cams * (60 / CAPACITY_PARAMS.captureMinPerPatient);
+   255→  const flowDur = clamp(75 / Math.min(arr, captureCap), 1.2, 4.5); // downstream: throttled by the bottleneck stage
+   256→  const queueDots = Math.min(12, Math.max(0, Math.round(out.queueLength)));
+   257→  const to100k = scaling.find((s) => s.patientsPerYear >= 100000) ?? scaling[scaling.length - 1];
+   258→
+   259→  const wait = waitTone(out.meanWaitMin);
+   260→  const capTone = loadTone(out.utilizationPct);
+   261→  const revTone = loadTone(out.reviewUtilizationPct);
+   262→  const revWait = waitTone(out.reviewWaitMin);
+   263→
+   264→  const banner =
+   265→    out.bottleneck === "CAPTURE"
+   266→      ? { icon: Camera, tone: "amber" as const, msg: "Cameras are the bottleneck — add a station or arrivals pile up" }
+   267→      : out.bottleneck === "REVIEW"
+   268→        ? { icon: Stethoscope, tone: "amber" as const, msg: "Doctors are the bottleneck — the review queue grows" }
+   269→        : { icon: Scale, tone: "green" as const, msg: "Capture and review are balanced" };
+   270→  const BannerIcon = banner.icon;
+   271→  const bannerCls =
+   272→    banner.tone === "amber"
+   273→      ? { box: "border-[#FBBF24]/35 bg-[#FBBF24]/[0.06] text-[#FBBF24]", chip: "border-[#FBBF24]/40 text-[#FBBF24]" }
+   274→      : { box: "border-[#34D399]/35 bg-[#34D399]/[0.06] text-[#34D399]", chip: "border-[#34D399]/40 text-[#34D399]" };
+   275→
+   276→  return (
+   277→    <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
+   278→      <SectionHeading
+   279→        eyebrow="PLANNING"
+   280→        title="Size the camp before you pitch it"
+   281→        sub="Drag the knobs — queueing math answers instantly. The difference between a demo and a district program."
+   282→      />
+   283→
+   284→      <div className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
+   285→        {/* ── 1 · Controls ─────────────────────────────────── */}
+   286→        <Reveal>
+   287→          <GlassCard className="lg:sticky lg:top-24">
+   288→            <div className="flex items-center justify-between gap-2">
+   289→              <h3 className="font-display text-lg font-semibold text-foreground">Camp knobs</h3>
+   290→              {!activePreset && <span className="chip border-white/25 text-muted-foreground">Custom</span>}
+   291→            </div>
+   292→
+   293→            <div className="mt-5 space-y-5">
+   294→              <Knob
+   295→                label="Cameras / screening stations"
+   296→                hint={`capture · ${CAPACITY_PARAMS.captureMinPerPatient} min per patient`}
+   297→                value={cams}
+   298→                min={1}
+   299→                max={10}
+   300→                onChange={setCams}
+   301→                onDragStart={() => setDragging(true)}
+   302→              />
+   303→              <Knob
+   304→                label="Reviewers"
+   305→                hint={`ophthalmologists / graders · ${CAPACITY_PARAMS.reviewMinPerCase} min per case`}
+   306→                value={revw}
+   307→                min={1}
+   308→                max={6}
+   309→                onChange={setRevw}
+   310→                onDragStart={() => setDragging(true)}
+   311→              />
+   312→              <Knob
+   313→                label="Arrivals / hour"
+   314→                hint="walk-in rate at the camp door"
+   315→                value={arr}
+   316→                min={10}
+   317→                max={60}
+   318→                onChange={setArr}
+   319→                onDragStart={() => setDragging(true)}
+   320→              />
+   321→            </div>
+   322→
+   323→            <div className="mt-6">
+   324→              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+   325→                Presets
+   326→              </p>
+   327→              <div className="grid grid-cols-3 gap-2">
+   328→                {(Object.keys(CAPACITY_PRESETS) as PresetKey[]).map((k) => {
+   329→                  const p = CAPACITY_PRESETS[k];
+   330→                  const active = activePreset === k;
+   331→                  return (
+   332→                    <button
+   333→                      key={k}
+   334→                      type="button"
+   335→                      onClick={() => applyPreset(k)}
+   336→                      aria-pressed={active}
+   337→                      className={cn(
+   338→                        "min-h-[52px] rounded-lg border px-1.5 py-2 text-center transition-all duration-200 ease-out",
+   339→                        active
+   340→                          ? "border-[#22D3EE]/60 bg-[#22D3EE]/10 text-[#22D3EE] shadow-[0_0_16px_rgba(34,211,238,0.18)]"
+   341→                          : "border-white/10 bg-white/[0.02] text-muted-foreground hover:border-[#22D3EE]/30 hover:text-foreground"
+   342→                      )}
+   343→                    >
+   344→                      <span className="block text-[11px] font-semibold leading-tight">{p.label}</span>
+   345→                      <span className="tabular mt-0.5 block text-[10px] opacity-70">
+   346→                        {p.cams}·{p.revw}·{p.arr}
+   347→                      </span>
+   348→                    </button>
+   349→                  );
+   350→                })}
+   351→              </div>
+   352→            </div>
+   353→
+   354→            <div className="mt-6 space-y-1.5 border-t border-white/10 pt-4 text-[11px] leading-relaxed text-muted-foreground">
+   355→              <p>
+   356→                {CAPACITY_PARAMS.captureMinPerPatient} min capture per patient ·{" "}
+   357→                {CAPACITY_PARAMS.reviewMinPerCase} min reviewer time per case · 35% of cases need human review ·{" "}
+   358→                {CAPACITY_PARAMS.hoursPerDay} h day · {CAPACITY_PARAMS.workingDays} days/year
+   359→              </p>
+   360→              <p>M/M/c queueing math — mirrors module5_capacity_planner.py.</p>
+   361→            </div>
+   362→          </GlassCard>
+   363→        </Reveal>
+   364→
+   365→        {/* ── Right column ─────────────────────────────────── */}
+   366→        <div className="space-y-6">
+   367→          {/* 2 · Live outputs */}
+   368→          <Reveal delay={0.05}>
+   369→            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+   370→              <GlassCard className="p-4 sm:p-5">
+   371→                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+   372→                  <Camera className="h-3.5 w-3.5 shrink-0 text-[#22D3EE]" />
+   373→                  Patients / day
+   374→                </div>
+   375→                <div className="mt-2 font-display text-2xl font-bold text-[#22D3EE] text-glow-cyan sm:text-3xl">
+   376→                  <AnimatedNumber value={out.patientsPerDay} startOnVisible={false} duration={dragging ? 0 : 600} />
+   377→                </div>
+   378→                <p className="mt-1 text-[11px] text-muted-foreground">
+   379→                  screened per {CAPACITY_PARAMS.hoursPerDay} h camp day
+   380→                </p>
+   381→              </GlassCard>
+   382→
+   383→              <GlassCard className="p-4 sm:p-5">
+   384→                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+   385→                  <CalendarClock className="h-3.5 w-3.5 shrink-0 text-[#22D3EE]" />
+   386→                  Patients / year
+   387→                </div>
+   388→                <div className="mt-2 font-display text-2xl font-bold text-[#22D3EE] text-glow-cyan sm:text-3xl">
+   389→                  <AnimatedNumber value={out.patientsPerYear} startOnVisible={false} duration={dragging ? 0 : 600} />
+   390→                </div>
+   391→                <p className="mt-1 text-[11px] text-muted-foreground">
+   392→                  × {CAPACITY_PARAMS.workingDays} working days / year
+   393→                </p>
+   394→              </GlassCard>
+   395→
+   396→              <GlassCard className="p-4 sm:p-5">
+   397→                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+   398→                  <Timer className="h-3.5 w-3.5 shrink-0 text-[#22D3EE]" />
+   399→                  Mean wait
+   400→                </div>
+   401→                <div className={cn("mt-2 font-display text-2xl font-bold sm:text-3xl", wait.text)}>
+   402→                  {out.meanWaitMin >= UNBOUNDED_WAIT ? (
+   403→                    <span className="tabular">∞</span>
+   404→                  ) : (
+   405→                    <span className="tabular">
+   406→                      {out.meanWaitMin.toFixed(1)}
+   407→                      <span className="ml-1 text-sm font-semibold opacity-70">min</span>
+   408→                    </span>
+   409→                  )}
+   410→                </div>
+   411→                <p className="mt-1 text-[11px] text-muted-foreground">
+   412→                  {out.meanWaitMin >= UNBOUNDED_WAIT
+   413→                    ? "queue never drains — add capacity"
+   414→                    : "capture queue + review wait"}
+   415→                </p>
+   416→              </GlassCard>
+   417→
+   418→              <GlassCard className="p-4 sm:p-5">
+   419→                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+   420→                  <Gauge className="h-3.5 w-3.5 shrink-0 text-[#22D3EE]" />
+   421→                  Utilization
+   422→                </div>
+   423→                <div className={cn("mt-2 font-display text-2xl font-bold sm:text-3xl", capTone.text)}>
+   424→                  <span className="tabular">
+   425→                    {out.utilizationPct}
+   426→                    <span className="text-sm font-semibold opacity-70">%</span>
+   427→                  </span>
+   428→                </div>
+   429→                <p className="mt-1 text-[11px] text-muted-foreground">
+   430→                  reviewers{" "}
+   431→                  <span className={cn("tabular font-semibold", revTone.text)}>{out.reviewUtilizationPct}%</span>
+   432→                </p>
+   433→              </GlassCard>
+   434→            </div>
+   435→          </Reveal>
+   436→
+   437→          {/* 3 · Animated queue visualization */}
+   438→          <Reveal delay={0.1}>
+   439→            <GlassCard>
+   440→              <div className="flex flex-wrap items-center justify-between gap-2">
+   441→                <h3 className="font-display text-lg font-semibold text-foreground">Live queue — a day at the camp</h3>
+   442→                <span className="chip border-white/15 text-muted-foreground">
+   443→                  {arr}/hr · {cams} cam · {revw} rev
+   444→                </span>
+   445→              </div>
+   446→
+   447→              <div aria-hidden className="mt-4 rounded-xl border border-white/10 bg-[#081120]/50 p-3 sm:p-4">
+   448→                <div className="flex flex-wrap items-center gap-x-2 gap-y-3 sm:flex-nowrap">
+   449→                  {/* arrivals flow — speed tracks the arrivals/hour knob */}
+   450→                  <div className="min-w-[88px] flex-1">
+   451→                    <p className="mb-1 hidden text-center text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground sm:block">
+   452→                      Arrivals
+   453→                    </p>
+   454→                    <div className="relative h-7 overflow-hidden rounded-md border border-white/10 bg-white/[0.02]">
+   455→                      <FlowDots count={4} duration={arrDur} color={CYAN} reduced={reduce} />
+   456→                    </div>
+   457→                  </div>
+   458→
+   459→                  <ArrowRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:block" />
+   460→
+   461→                  {/* camera stations — one small box per camera */}
+   462→                  <div className="shrink-0">
+   463→                    <p className="mb-1 hidden text-center text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground sm:block">
+   464→                      Capture ×{cams}
+   465→                    </p>
+   466→                    <div className="flex max-w-[104px] flex-wrap justify-center gap-1 sm:max-w-[124px]">
+   467→                      {Array.from({ length: cams }, (_, i) => (
+   468→                        <span
+   469→                          key={i}
+   470→                          className="flex h-6 w-6 items-center justify-center rounded-md border border-[#22D3EE]/35 bg-[#22D3EE]/10 shadow-[0_0_10px_rgba(34,211,238,0.12)]"
+   471→                        >
+   472→                          <Camera className="h-3 w-3 text-[#22D3EE]" />
+   473→                        </span>
+   474→                      ))}
+   475→                    </div>
+   476→                  </div>
+   477→
+   478→                  <ArrowRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:block" />
+   479→
+   480→                  {/* AI pipeline orb */}
+   481→                  <div className="shrink-0">
+   482→                    <p className="mb-1 hidden text-center text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground sm:block">
+   483→                      AI gate
+   484→                    </p>
+   485→                    <span className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#22D3EE]/50 bg-[#22D3EE]/10">
+   486→                      <Sparkles className="h-4 w-4 text-[#22D3EE]" />
+   487→                      {!reduce && (
+   488→                        <motion.span
+   489→                          className="absolute inset-0 rounded-full border border-[#22D3EE]/50"
+   490→                          animate={{ scale: [1, 1.5], opacity: [0.7, 0] }}
+   491→                          transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
+   492→                        />
+   493→                      )}
+   494→                    </span>
+   495→                  </div>
+   496→
+   497→                  {/* split: 65% auto-cleared · 35% doctor review */}
+   498→                  <div className="order-last min-w-[240px] flex-1 basis-full space-y-2 sm:order-none sm:basis-auto">
+   499→                    <div className="flex items-center gap-2">
+   500→                      <div className="relative h-6 min-w-0 flex-1 overflow-hidden rounded-md border border-[#34D399]/25 bg-[#34D399]/[0.05]">
+   501→                        <FlowDots count={3} duration={flowDur} color={GREEN} reduced={reduce} />
+   502→                      </div>
+   503→                      <span className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#34D399]/40 bg-[#34D399]/10 px-2 py-1 text-[11px] font-semibold text-[#34D399]">
+   504→                        <ShieldCheck className="h-3.5 w-3.5" />
+   505→                        Auto-cleared · 65%
+   506→                      </span>
+   507→                    </div>
+   508→                    <div className="flex items-stretch gap-2">
+   509→                      <div className="relative min-w-0 flex-1 overflow-hidden rounded-md border border-[#FBBF24]/25 bg-[#FBBF24]/[0.05]">
+   510→                        <FlowDots count={2} duration={flowDur} color={AMBER} reduced={reduce} />
+   511→                      </div>
+   512→                      <div className="flex w-[152px] shrink-0 flex-col justify-center gap-1 rounded-lg border border-[#FBBF24]/40 bg-[#FBBF24]/10 px-2 py-1.5">
+   513→                        <div className="flex items-center gap-1.5">
+   514→                          <Stethoscope className="h-3.5 w-3.5 shrink-0 text-[#FBBF24]" />
+   515→                          <span className="text-[11px] font-semibold text-[#FBBF24]">Doctor review</span>
+   516→                          <span className="tabular ml-auto text-[11px] font-bold text-[#FBBF24]">{queueDots}</span>
+   517→                        </div>
+   518→                        <div className="flex min-h-[6px] flex-wrap items-center gap-1">
+   519→                          {queueDots === 0 ? (
+   520→                            <span className="text-[10px] text-muted-foreground">queue empty</span>
+   521→                          ) : (
+   522→                            Array.from({ length: queueDots }, (_, i) => (
+   523→                              <motion.span
+   524→                                key={i}
+   525→                                className="h-1.5 w-1.5 rounded-full"
+   526→                                style={{ background: i === 0 ? RED : AMBER }}
+   527→                                animate={reduce ? undefined : { opacity: [0.45, 1, 0.45] }}
+   528→                                transition={{ duration: 1.6, repeat: Infinity, delay: i * 0.12, ease: "easeInOut" }}
+   529→                              />
+   530→                            ))
+   531→                          )}
+   532→                          {queueDots >= 12 && <span className="text-[10px] font-semibold text-[#FBBF24]">+more</span>}
+   533→                        </div>
+   534→                      </div>
+   535→                    </div>
+   536→                  </div>
+   537→                </div>
+   538→              </div>
+   539→              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+   540→                Decorative flow — dot speed tracks arrivals ({arr}/hr) and the slowest stage; the orb is the AI gate;
+   541→                ~35% of cases wait for a doctor. The red dot is an urgent case at the front of the review queue.
+   542→              </p>
+   543→
+   544→              {/* bottleneck banner */}
+   545→              <div className={cn("mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border px-3 py-2.5 text-sm", bannerCls.box)}>
+   546→                <BannerIcon className="h-4 w-4 shrink-0" />
+   547→                <span className={cn("chip shrink-0 text-[10px]", bannerCls.chip)}>{out.bottleneck}</span>
+   548→                <span className="text-muted-foreground">{banner.msg}</span>
+   549→              </div>
+   550→            </GlassCard>
+   551→          </Reveal>
+   552→        </div>
+   553→      </div>
+   554→
+   555→      {/* ── 4 · District scaling chart ───────────────────── */}
+   556→      <Reveal className="mt-6">
+   557→        <GlassCard>
+   558→          <div className="flex flex-wrap items-end justify-between gap-3">
+   559→            <div>
+   560→              <h3 className="font-display text-lg font-semibold text-foreground">District scaling</h3>
+   561→              <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+   562→                Scaling the district pilot: the same deployment replicated across a state.
+   563→              </p>
+   564→            </div>
+   565→            <span className="chip border-[#22D3EE]/40 text-[#22D3EE]">
+   566→              {to100k.districts} district{to100k.districts === 1 ? "" : "s"} → ~
+   567→              {to100k.patientsPerYear.toLocaleString("en-IN")} patients / year
+   568→            </span>
+   569→          </div>
+   570→          <div className="mt-4 h-60 sm:h-72">
+   571→            <ResponsiveContainer width="100%" height="100%">
+   572→              <AreaChart data={scaling} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
+   573→                <defs>
+   574→                  <linearGradient id="capScalingFill" x1="0" y1="0" x2="0" y2="1">
+   575→                    <stop offset="0%" stopColor={CYAN} stopOpacity={0.35} />
+   576→                    <stop offset="100%" stopColor={CYAN} stopOpacity={0} />
+   577→                  </linearGradient>
+   578→                </defs>
+   579→                <CartesianGrid stroke="rgba(34,211,238,0.08)" vertical={false} />
+   580→                <XAxis
+   581→                  dataKey="districts"
+   582→                  stroke={AXIS}
+   583→                  tick={{ fontSize: 11 }}
+   584→                  tickLine={false}
+   585→                  axisLine={{ stroke: "rgba(130,150,179,0.35)" }}
+   586→                />
+   587→                <YAxis
+   588→                  stroke={AXIS}
+   589→                  tick={{ fontSize: 11 }}
+   590→                  tickLine={false}
+   591→                  axisLine={false}
+   592→                  width={48}
+   593→                  tickFormatter={(v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))}
+   594→                />
+   595→                <RTooltip content={scalingTipContent} cursor={{ stroke: "rgba(34,211,238,0.25)", strokeDasharray: "3 3" }} />
+   596→                <ReferenceLine
+   597→                  y={100000}
+   598→                  stroke={AMBER}
+   599→                  strokeDasharray="6 4"
+   600→                  label={{ value: "100k / year", fill: AMBER, fontSize: 11, position: "insideTopRight" }}
+   601→                />
+   602→                <Area
+   603→                  type="monotone"
+   604→                  dataKey="patientsPerYear"
+   605→                  name="Patients / year"
+   606→                  stroke={CYAN}
+   607→                  strokeWidth={2}
+   608→                  fill="url(#capScalingFill)"
+   609→                  activeDot={{ r: 4, fill: CYAN, stroke: "#060B14" }}
+   610→                />
+   611→              </AreaChart>
+   612→            </ResponsiveContainer>
+   613→          </div>
+   614→        </GlassCard>
+   615→      </Reveal>
+   616→
+   617→      {/* ── 5 · Sanity strip ─────────────────────────────── */}
+   618→      <Reveal className="mt-6">
+   619→        <div className="flex flex-wrap items-center gap-2.5">
+   620→          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Sanity</span>
+   621→          {overloaded && (
+   622→            <span className="chip border-[#F87171]/45 bg-[#F87171]/10 text-[#F87171] shadow-[0_0_16px_rgba(248,113,113,0.2)]">
+   623→              <TriangleAlert className="h-3 w-3" />
+   624→              System overloaded — wait times unbounded
+   625→            </span>
+   626→          )}
+   627→          <span className={cn("chip", capTone.chip)}>capture utilization {out.utilizationPct}%</span>
+   628→          <span className={cn("chip", revTone.chip)}>review utilization {out.reviewUtilizationPct}%</span>
+   629→          <span className={cn("chip", revWait.chip)}>
+   630→            review wait {out.reviewWaitMin >= UNBOUNDED_WAIT ? "unbounded (∞)" : `${out.reviewWaitMin} min`}
+   631→          </span>
+   632→        </div>
+   633→      </Reveal>
+   634→    </section>
+   635→  );
+   636→}
+   637→

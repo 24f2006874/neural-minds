@@ -9,7 +9,9 @@ import {
   Crosshair,
   Download,
   FileDown,
+  FileText,
   Info,
+  ListChecks,
   RefreshCw,
   ScanEye,
   ScanLine,
@@ -30,6 +32,7 @@ import { RetinaView } from "@/components/drishti/retina-view";
 import { ConfBar, ScoreDial } from "@/components/drishti/score-dial";
 import { useNav } from "@/components/drishti/shell";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,7 +54,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { ICDR_CLASSES, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
-import { downloadReportPdf } from "@/lib/report-pdf";
+import { downloadRegisterPdf, downloadReportPdf, type RegisterRow } from "@/lib/report-pdf";
 import { cn } from "@/lib/utils";
 
 // ────────────────────────────────────────────────────────────
@@ -375,6 +378,11 @@ export default function DashboardView() {
   const [reopenTarget, setReopenTarget] = useState<string | null>(null);
   const quietRefreshRef = useRef(false);
 
+  // bulk sign-off selection (review-queue cases approved in one action)
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
   const applyOverrides = useCallback(
     (list: PatientRow[]): PatientRow[] =>
       list.map((r) => (signedOffRef.current[r.patient_id] ? { ...r, status: "AUTO_CLEARED" as CaseStatus } : r)),
@@ -532,6 +540,46 @@ export default function DashboardView() {
     [sortKey]
   );
 
+  // ── Bulk sign-off selection ─────────────────────────────────
+  // Only review-queue cases (MODERATE / URGENT, not yet signed) can be picked.
+  const isSignable = useCallback(
+    (r: PatientRow) => (r.status === "NEEDS_REVIEW" || r.status === "URGENT") && !r.reviewed_by,
+    []
+  );
+  // keep only IDs that are still live, signable rows (prunes stale picks after refreshes)
+  const selectedIds = useMemo(
+    () =>
+      [...selected].filter((id) =>
+        (allRows ?? []).some((r) => r.patient_id === id && isSignable(r))
+      ),
+    [selected, allRows, isSignable]
+  );
+  const visibleSignableIds = useMemo(
+    () => visibleRows.filter((r) => isSignable(r)).map((r) => r.patient_id),
+    [visibleRows, isSignable]
+  );
+  const allVisibleSelected =
+    visibleSignableIds.length > 0 && visibleSignableIds.every((id) => selected.has(id));
+
+  const toggleSelect = useCallback((patientId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(patientId)) next.delete(patientId);
+      else next.add(patientId);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllVisible = useCallback(() => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allSel = visibleSignableIds.length > 0 && visibleSignableIds.every((id) => next.has(id));
+      if (allSel) visibleSignableIds.forEach((id) => next.delete(id));
+      else visibleSignableIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }, [visibleSignableIds]);
+
   const openReport = useCallback((patientId: string) => {
     setOpenId(patientId);
     setDetailNonce((n) => n + 1);
@@ -632,6 +680,86 @@ export default function DashboardView() {
       setSigningOff(null);
       setReopenTarget(null);
     }
+  }
+
+  async function handleBulkSignOff() {
+    if (bulkBusy || selectedIds.length === 0) return;
+    setBulkBusy(true);
+    const ids = selectedIds;
+    try {
+      const res = await fetch("/api/patients/bulk-signoff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patient_ids: ids, reviewed_by: "Dr. Review (dashboard demo)" }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? `API returned ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        signed: string[];
+        signed_count: number;
+        failed: Array<{ patient_id: string; error: string }>;
+        reviewed_by: string;
+        reviewed_at: string | null;
+      };
+      const signedSet = new Set(data.signed);
+      if (data.signed.length > 0) {
+        const stamp = data.reviewed_at ?? new Date().toISOString();
+        const nextRef = { ...signedOffRef.current };
+        data.signed.forEach((id) => {
+          nextRef[id] = true;
+        });
+        signedOffRef.current = nextRef;
+        // record pre-sign-off lane per case so Undo restores the exact queue
+        const prevMap = new Map((allRows ?? []).map((r) => [r.patient_id, r.status as CaseStatus]));
+        setSignedOff((s) => {
+          const next = { ...s };
+          data.signed.forEach((id) => {
+            const prev = prevMap.get(id);
+            next[id] = {
+              by: data.reviewed_by,
+              at: new Date(stamp).toLocaleString(),
+              previousStatus: prev === "URGENT" ? "URGENT" : "NEEDS_REVIEW",
+            };
+          });
+          return next;
+        });
+        const flip = (r: PatientRow): PatientRow =>
+          signedSet.has(r.patient_id)
+            ? { ...r, status: "AUTO_CLEARED", reviewed_by: data.reviewed_by, reviewed_at: stamp }
+            : r;
+        setAllRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
+        setRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
+        toast.success(
+          `${data.signed_count} case${data.signed_count === 1 ? "" : "s"} signed off — saved to the register`
+        );
+      }
+      if (data.failed.length > 0) {
+        const first = data.failed[0];
+        toast.error(
+          `${data.failed.length} case${data.failed.length === 1 ? "" : "s"} couldn't be signed — ${first.patient_id}: ${first.error}`
+        );
+      }
+      setSelected(new Set());
+      quietRefreshRef.current = true;
+      void loadAll(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Bulk sign-off failed — try again");
+    } finally {
+      setBulkBusy(false);
+      setBulkConfirmOpen(false);
+    }
+  }
+
+  function handleRegisterPdf() {
+    const signedRows = (allRows ?? []).filter((r) => r.reviewed_by);
+    if (signedRows.length === 0) {
+      toast.info("No signed-off cases yet — approve a case first to build the register");
+      return;
+    }
+    downloadRegisterPdf(signedRows as RegisterRow[]);
+    toast.success(`Register PDF generated — ${signedRows.length} signed case${signedRows.length === 1 ? "" : "s"}`);
   }
 
   const detailResult = detail?.details ?? null;
@@ -820,6 +948,15 @@ export default function DashboardView() {
                 </button>
               )}
             </div>
+            <button
+              type="button"
+              onClick={handleRegisterPdf}
+              className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#34D399]/40 hover:text-[#34D399] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title="Download a PDF register of every doctor-signed case"
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" />
+              Register PDF
+            </button>
             <a
               href={`/api/patients/export?filter=${filter}`}
               download
@@ -854,22 +991,34 @@ export default function DashboardView() {
             <EmptyQueue onLaunch={() => navigate("screening")} searching={query.trim() !== ""} query={query.trim()} />
           ) : (
             <div className="drishti-scroll max-h-[480px] overflow-y-auto">
-              <Table>
+              <Table className="min-w-[760px]">
                 <TableHeader className="sticky top-0 z-10 bg-[#0A1628]/95 backdrop-blur">
                   <TableRow className="border-white/10 hover:bg-transparent">
+                    <TableHead className="w-10 pr-2">
+                      <Checkbox
+                        checked={allVisibleSelected ? true : selectedIds.length > 0 ? "indeterminate" : false}
+                        onCheckedChange={toggleSelectAllVisible}
+                        disabled={visibleSignableIds.length === 0}
+                        aria-label="Select all signable cases in this lane for bulk sign-off"
+                        title="Select every review-queue case in this lane"
+                        className="h-4 w-4 border-white/30 bg-white/[0.04] data-[state=checked]:border-[#34D399] data-[state=checked]:bg-[#34D399] data-[state=checked]:text-[#05261B]"
+                      />
+                    </TableHead>
                     <SortHead label="Patient ID" colKey="patient_id" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
                     <SortHead label="Date" colKey="created_at" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
                     <SortHead label="Grade" colKey="grade" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
-                    <SortHead label="Confidence" colKey="confidence" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
+                    <SortHead label="Conf" colKey="confidence" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
                     <SortHead label="Trust" colKey="trust_score" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
                     <SortHead label="Status" colKey="status" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
-                    <TableHead className="text-xs uppercase tracking-wider">DME</TableHead>
+                    <TableHead className="hidden text-xs uppercase tracking-wider lg:table-cell">DME</TableHead>
                     <SortHead label="Time" colKey="processing_ms" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-right text-xs" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {visibleRows.map((r) => {
                     const gColor = rowGradeColor(r);
+                    const selectable = isSignable(r);
+                    const isSelected = selected.has(r.patient_id);
                     return (
                       <TableRow
                         key={r.id}
@@ -883,12 +1032,29 @@ export default function DashboardView() {
                           }
                         }}
                         style={
-                          r.reviewed_by
-                            ? { boxShadow: "inset 2px 0 0 0 rgba(52,211,153,0.55)" }
-                            : undefined
+                          isSelected
+                            ? { boxShadow: "inset 3px 0 0 0 rgba(52,211,153,0.95), inset 0 0 0 1px rgba(52,211,153,0.22)" }
+                            : r.reviewed_by
+                              ? { boxShadow: "inset 2px 0 0 0 rgba(52,211,153,0.55)" }
+                              : undefined
                         }
-                        className="cursor-pointer border-white/5 hover:bg-white/[0.03] focus-visible:bg-white/[0.05] focus-visible:outline-none"
+                        className={cn(
+                          "cursor-pointer border-white/5 focus-visible:bg-white/[0.05] focus-visible:outline-none",
+                          isSelected
+                            ? "bg-[#34D399]/[0.06] hover:bg-[#34D399]/[0.09]"
+                            : "hover:bg-white/[0.03]"
+                        )}
                       >
+                        <TableCell className="w-10 py-3 pr-2" onClick={(e) => e.stopPropagation()}>
+                          {selectable ? (
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={() => toggleSelect(r.patient_id)}
+                              aria-label={`Select ${r.patient_id} for sign-off`}
+                              className="h-4 w-4 border-white/30 bg-white/[0.04] data-[state=checked]:border-[#34D399] data-[state=checked]:bg-[#34D399] data-[state=checked]:text-[#05261B]"
+                            />
+                          ) : null}
+                        </TableCell>
                         <TableCell className="py-3">
                           <span className="font-display font-semibold text-foreground">{r.patient_id}</span>
                         </TableCell>
@@ -923,7 +1089,7 @@ export default function DashboardView() {
                             )}
                           </span>
                         </TableCell>
-                        <TableCell className="py-3">
+                        <TableCell className="hidden py-3 lg:table-cell">
                           {r.dme_risk ? (
                             <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#F87171]">
                               <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
@@ -961,18 +1127,37 @@ export default function DashboardView() {
         ) : (
           visibleRows.map((r) => {
             const gColor = rowGradeColor(r);
+            const selectable = isSignable(r);
+            const isSelected = selected.has(r.patient_id);
             return (
               <GlassCard
                 key={r.id}
-                hover
-                className="glass-card-hover cursor-pointer p-4"
+                className={cn(
+                  "p-3",
+                  !selectable && "glass-card-hover cursor-pointer"
+                )}
+                {...(!selectable ? { hover: true } : {})}
               >
-                <button
-                  type="button"
-                  className="w-full text-left"
-                  aria-label={`Open report for ${r.patient_id}`}
-                  onClick={() => openReport(r.patient_id)}
-                >
+                <div className="flex items-start gap-2.5">
+                  {selectable ? (
+                    <div className="flex h-6 items-center" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleSelect(r.patient_id)}
+                        aria-label={`Select ${r.patient_id} for sign-off`}
+                        className="h-4 w-4 border-white/30 bg-white/[0.04] data-[state=checked]:border-[#34D399] data-[state=checked]:bg-[#34D399] data-[state=checked]:text-[#05261B]"
+                      />
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={cn(
+                      "w-full min-w-0 text-left",
+                      selectable && "glass-card-hover cursor-pointer rounded-lg"
+                    )}
+                    aria-label={`Open report for ${r.patient_id}`}
+                    onClick={() => openReport(r.patient_id)}
+                  >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-display font-semibold text-foreground">{r.patient_id}</p>
@@ -1012,12 +1197,56 @@ export default function DashboardView() {
                     <span>Conf {(r.confidence * 100).toFixed(1)}%</span>
                     <span>{(r.processing_ms / 1000).toFixed(1)}s</span>
                   </div>
-                </button>
+                  </button>
+                </div>
               </GlassCard>
             );
           })
         )}
       </div>
+
+      {/* 3c ── Bulk selection action bar */}
+      {selectedIds.length > 0 && (
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-28 z-40 flex justify-center px-4 sm:bottom-8"
+          role="region"
+          aria-label="Bulk sign-off actions"
+        >
+          <div className="rise-in pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-2xl border border-[#34D399]/35 bg-[#0B1526]/95 p-3 shadow-[0_10px_44px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:w-auto">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#34D399]/40 bg-[#34D399]/10 text-[#34D399]">
+              <ListChecks className="h-4.5 w-4.5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1 sm:flex-none">
+              <p className="tabular text-sm font-semibold leading-tight text-foreground">
+                {selectedIds.length} case{selectedIds.length === 1 ? "" : "s"} selected
+              </p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                ready for bulk sign-off · approvals close in the register
+              </p>
+            </div>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <Button
+                size="sm"
+                className="min-h-10 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B]"
+                onClick={() => setBulkConfirmOpen(true)}
+              >
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                Sign off all
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="min-h-10 px-2.5 text-muted-foreground hover:text-foreground"
+                onClick={() => setSelected(new Set())}
+                aria-label="Clear selection"
+                title="Clear selection"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 4 ── Report modal */}
       <Dialog open={openId !== null} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
@@ -1266,6 +1495,45 @@ export default function DashboardView() {
             >
               <Undo2 className="h-4 w-4" aria-hidden="true" />
               Reopen case
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {/* 6 ── Bulk sign-off confirmation */}
+      <AlertDialog open={bulkConfirmOpen} onOpenChange={setBulkConfirmOpen}>
+        <AlertDialogContent className="border-[#34D399]/30 bg-[#0B1526]/95 backdrop-blur-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display text-lg">
+              Sign off {selectedIds.length} case{selectedIds.length === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-relaxed text-muted-foreground">
+              Each selected case becomes{" "}
+              <span className="font-semibold text-[#34D399]">auto-cleared with your sign-off</span> recorded in the
+              audit trail. Cases:{" "}
+              <span className="tabular text-foreground">
+                {selectedIds.slice(0, 4).join(", ")}
+                {selectedIds.length > 4 ? ` + ${selectedIds.length - 4} more` : ""}
+              </span>
+              . Each sign-off can be undone later from its report.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className="min-h-11 border-white/15 bg-transparent hover:bg-white/5 hover:text-foreground"
+              disabled={bulkBusy}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B]"
+              disabled={bulkBusy}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleBulkSignOff();
+              }}
+            >
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+              {bulkBusy ? "Signing off…" : `Approve & sign off ${selectedIds.length}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

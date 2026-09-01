@@ -15,7 +15,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const row = await db.screening.findUnique({ where: { patientId } });
   if (row) {
-    return NextResponse.json({ ...row, details: JSON.parse(row.details) });
+    return NextResponse.json({
+      ...row,
+      // snake_case aliases — keep the single-case shape consistent with the
+      // /api/patients list route (patient_id / created_at / reviewed_by / …)
+      // so the dashboard report modal can read audit fields after a reload.
+      patient_id: row.patientId,
+      created_at: row.createdAt,
+      reviewed_by: row.reviewedBy,
+      reviewed_at: row.reviewedAt,
+      review_note: row.reviewNote,
+      details: JSON.parse(row.details),
+    });
   }
 
   // Not yet in DB — synthesize so judges can query any ID
