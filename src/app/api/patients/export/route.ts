@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/patients/export?filter=all|auto_cleared|needs_review|urgent|rejected
  *                     or ?ids=ID1,ID2,…   (bulk-selection export)
+ *                     or ?day=YYYY-MM-DD   (camp-day scope — narrows any of the above)
  * CSV export of the screening register (for program managers) with the full
  * audit trail (reviewed_by / reviewed_at / review_note) plus the per-case
  * decision log (audit_events count + compact audit_trail) — column parity
@@ -16,6 +17,9 @@ export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
   const filter = params.get("filter") ?? "all";
   const idsParam = params.get("ids");
+  // camp-day scope — local-calendar YYYY-MM-DD, mirroring the client's dayKeyOf
+  const dayParam = params.get("day");
+  const day = dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : null;
 
   // ids= wins over filter= — exports exactly the selected cases (order preserved)
   const ids = idsParam
@@ -40,6 +44,12 @@ export async function GET(req: NextRequest) {
     take: 5000,
   });
   const ordered = ids ? ids.map((id) => rows.find((r) => r.patientId === id)).filter((r) => r != null) : rows;
+
+  /** Local-calendar YYYY-MM-DD of a DB timestamp — camp days are calendar days
+   *  at the deployment's timezone, never UTC slices (same rule as the UI). */
+  const dayKeyOf = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const dayScoped = day ? ordered.filter((r) => dayKeyOf(r.createdAt) === day) : ordered;
 
   const esc = (v: string | number | boolean | null | undefined | Date) => {
     const s = v === null || v === undefined ? "" : String(v);
@@ -78,7 +88,7 @@ export async function GET(req: NextRequest) {
   };
 
   const lines = [header.join(",")];
-  for (const r of ordered) {
+  for (const r of dayScoped) {
     const audit = auditOf(r.details);
     lines.push([
       esc(r.patientId),
@@ -106,7 +116,11 @@ export async function GET(req: NextRequest) {
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
-  const scope = ids ? `selected-${ordered.length}` : filter;
+  const scope = ids
+    ? `selected-${dayScoped.length}`
+    : day
+      ? `${filter}-day-${day}`
+      : filter;
   return new NextResponse(lines.join("\n"), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

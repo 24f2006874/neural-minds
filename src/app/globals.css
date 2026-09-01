@@ -489,6 +489,35 @@
   #dashboard-root .print-only {
     display: block !important;
   }
+
+  /* ── r11: capacity planner print one-pager ──────────────────────
+     The interactive planner (knobs, live queue, chart) stays on screen;
+     paper gets the .cap-print summary: header, output table, bottleneck
+     verdict, district-scaling table and assumptions. */
+  #capacity-root {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  #capacity-root .cap-screen-only {
+    display: none !important;
+  }
+  #capacity-root .print-only {
+    display: block !important;
+  }
+  #capacity-root .cap-print table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: fixed !important;
+  }
+  #capacity-root .cap-print th {
+    font-size: 9px !important;
+    letter-spacing: 0.08em !important;
+    color: #111827 !important;
+  }
+  #capacity-root .cap-print td {
+    break-inside: avoid;
+    color: #111827 !important;
+  }
 }
 
 /* r8 print register styles */

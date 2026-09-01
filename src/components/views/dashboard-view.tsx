@@ -11,6 +11,7 @@ import {
   Crosshair,
   Download,
   FileDown,
+  FilePenLine,
   FileText,
   History,
   Info,
@@ -453,6 +454,9 @@ export default function DashboardView() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkNote, setBulkNote] = useState("");
 
+  // single-case sign-off note (report modal — parity with the bulk note)
+  const [signOffNote, setSignOffNote] = useState("");
+
   // register audit trail (activity timeline under the queue)
   const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
   const [auditTotal, setAuditTotal] = useState(0);
@@ -604,16 +608,35 @@ export default function DashboardView() {
   );
 
   // distinct camp days in the register (chronological; Day 1 = earliest)
+  // with a per-day mini-summary: signed count + referable count (grade ≥ Moderate NPDR)
   const campDays = useMemo(() => {
-    const counts = new Map<string, number>();
+    const acc = new Map<string, { count: number; signed: number; referable: number; unsignedReferable: number }>();
     for (const r of allRows ?? []) {
       const key = dayKeyOf(r.created_at);
       if (!key) continue;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const s = acc.get(key) ?? { count: 0, signed: 0, referable: 0, unsignedReferable: 0 };
+      s.count += 1;
+      if (r.reviewed_by) s.signed += 1;
+      if (r.class_level >= 2) {
+        s.referable += 1;
+        if (!r.reviewed_by) s.unsignedReferable += 1;
+      }
+      acc.set(key, s);
     }
-    return [...counts.entries()]
+    return [...acc.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-      .map(([key, count], i) => ({ key, day: i + 1, count }));
+      .map(([key, s], i) => ({ key, day: i + 1, ...s }));
+  }, [allRows]);
+
+  // "All days" chip shares the same mini-summary numbers across the register
+  const allDaysSummary = useMemo(() => {
+    const rows = allRows ?? [];
+    return {
+      count: rows.length,
+      signed: rows.filter((r) => r.reviewed_by).length,
+      referable: rows.filter((r) => r.class_level >= 2).length,
+      unsignedReferable: rows.filter((r) => r.class_level >= 2 && !r.reviewed_by).length,
+    };
   }, [allRows]);
 
   // per-type counts + filtered feed for the activity timeline chips
@@ -709,16 +732,22 @@ export default function DashboardView() {
   const openReport = useCallback((patientId: string) => {
     setOpenId(patientId);
     setDetailNonce((n) => n + 1);
+    setSignOffNote("");
   }, []);
 
   async function handleSignOff(patientId: string) {
     if (signingOff) return;
     setSigningOff(patientId);
+    const note = signOffNote.trim() ? signOffNote.trim().slice(0, 400) : null;
     try {
       const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "AUTO_CLEARED", reviewed_by: `${doctor}${DEMO_SIGNER_SUFFIX}` }),
+        body: JSON.stringify({
+          status: "AUTO_CLEARED",
+          reviewed_by: `${doctor}${DEMO_SIGNER_SUFFIX}`,
+          ...(note ? { note } : {}),
+        }),
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
@@ -757,7 +786,7 @@ export default function DashboardView() {
                   at: new Date().toISOString(),
                   action: "SIGNED",
                   by: data.reviewed_by,
-                  note: `Signed off by ${doctor}`,
+                  note: note ?? `Signed off by ${doctor}`,
                   status: "AUTO_CLEARED",
                 }),
               },
@@ -766,6 +795,7 @@ export default function DashboardView() {
       );
       // quiet refresh of stats + counts (list already flipped optimistically)
       quietRefreshRef.current = true;
+      setSignOffNote("");
       void loadAll(true);
       void loadAudit(true);
     } catch (e) {
@@ -1216,7 +1246,9 @@ export default function DashboardView() {
               href={
                 selectedIds.length > 0
                   ? `/api/patients/export?ids=${encodeURIComponent(selectedIds.join(","))}`
-                  : `/api/patients/export?filter=${filter}`
+                  : dayKey !== "all"
+                    ? `/api/patients/export?filter=${filter}&day=${dayKey}`
+                    : `/api/patients/export?filter=${filter}`
               }
               download
               className={cn(
@@ -1228,7 +1260,9 @@ export default function DashboardView() {
               title={
                 selectedIds.length > 0
                   ? `Download the ${selectedIds.length} selected case${selectedIds.length === 1 ? "" : "s"} as CSV`
-                  : "Download the current queue as a CSV register"
+                  : dayKey !== "all"
+                    ? `Download the current queue as a CSV register — Day ${campDays.find((d) => d.key === dayKey)?.day ?? ""} only (camp-day scope travels with the export)`
+                    : "Download the current queue as a CSV register"
               }
             >
               <FileDown className="h-4 w-4" aria-hidden="true" />
@@ -1252,9 +1286,16 @@ export default function DashboardView() {
             aria-label={t("dash.day.group")}
           >
             {([
-              { key: "all", day: 0, count: (allRows ?? []).length },
+              {
+                key: "all",
+                day: 0,
+                count: allDaysSummary.count,
+                signed: allDaysSummary.signed,
+                referable: allDaysSummary.referable,
+                unsignedReferable: allDaysSummary.unsignedReferable,
+              },
               ...campDays,
-            ] as Array<{ key: string; day: number; count: number }>).map((d) => {
+            ] as Array<{ key: string; day: number; count: number; signed: number; referable: number; unsignedReferable: number }>).map((d) => {
               const active = dayKey === d.key;
               const isAll = d.key === "all";
               const full = isAll
@@ -1262,13 +1303,27 @@ export default function DashboardView() {
                 : new Date(d.key + "T00:00:00").toLocaleDateString("en-GB", {
                     weekday: "short", day: "numeric", month: "short", year: "numeric",
                   });
+              // per-day mini-summary in the tooltip: cases · signed · referable
+              const summary = t("dash.day.summary", {
+                count: d.count,
+                s: d.count === 1 ? "" : "s",
+                signed: d.signed,
+                referable: d.referable,
+              });
+              const tip = full
+                ? `${t("dash.day.tab", { n: d.day })} — ${full} · ${summary}`
+                : `${t("dash.day.all")} · ${summary}`;
+              // referable-status dot: amber while the day still has unsigned referable
+              // cases, green once every referable case on that day has been signed off
+              const dotTone =
+                d.referable > 0 ? (d.unsignedReferable > 0 ? "#FBBF24" : "#34D399") : null;
               return (
                 <button
                   key={d.key}
                   type="button"
                   onClick={() => setDayKey(d.key)}
                   aria-pressed={active}
-                  title={full ? `Camp day ${d.day} — ${full} · ${d.count} case${d.count === 1 ? "" : "s"}` : `${t("dash.day.all")} · ${d.count} case${d.count === 1 ? "" : "s"}`}
+                  title={tip}
                   className={cn(
                     "flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs",
                     active
@@ -1278,6 +1333,16 @@ export default function DashboardView() {
                 >
                   {isAll && <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />}
                   {isAll ? t("dash.day.all") : t("dash.day.tab", { n: d.day })}
+                  {dotTone && (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        active && d.unsignedReferable > 0 && "animate-pulse"
+                      )}
+                      style={{ background: dotTone, boxShadow: `0 0 6px ${dotTone}` }}
+                    />
+                  )}
                   <span
                     className={cn(
                       "tabular rounded-full px-1.5 py-px text-[9.5px] font-semibold",
@@ -1982,6 +2047,26 @@ export default function DashboardView() {
                 );
               })()}
 
+              {/* single-case sign-off note — parity with the bulk sign-off note;
+                  persisted verbatim in the audit trail + register review_note */}
+              {canSign && (
+                <div className="space-y-1.5 px-6 pb-1">
+                  <label htmlFor="signoff-note" className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                    <FilePenLine className="h-3.5 w-3.5 text-[#22D3EE]" aria-hidden="true" />
+                    {t("dash.bulk.noteLabel")}
+                  </label>
+                  <Textarea
+                    id="signoff-note"
+                    value={signOffNote}
+                    onChange={(e) => setSignOffNote(e.target.value)}
+                    placeholder={t("dash.bulk.notePlaceholder")}
+                    rows={2}
+                    maxLength={400}
+                    disabled={signingOff === openId}
+                    className="resize-none border-white/15 bg-white/[0.03] text-sm placeholder:text-muted-foreground/60 focus-visible:border-[#22D3EE]/50 focus-visible:ring-[#22D3EE]/25"
+                  />
+                </div>
+              )}
               <DialogFooter className="flex-col gap-3 border-t border-white/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Info className="h-3.5 w-3.5" aria-hidden="true" />

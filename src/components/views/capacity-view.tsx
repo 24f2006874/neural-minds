@@ -19,6 +19,7 @@ import {
   Gauge,
   Layers,
   Link2,
+  Printer,
   Scale,
   ShieldCheck,
   Sparkles,
@@ -371,7 +372,87 @@ export default function CapacityView() {
       : { box: "border-[#34D399]/35 bg-[#34D399]/[0.06] text-[#34D399]", chip: "border-[#34D399]/40 text-[#34D399]" };
 
   return (
-    <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
+    <section id="capacity-root" className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
+      {/* ── Print-only one-pager ─────────────────────────────────
+          Paper summary of the current plan: header, config, output table,
+          bottleneck verdict, district-scaling table and the assumptions.
+          Screen UI (knobs, live queue, chart) is hidden via .cap-screen-only. */}
+      <div className="print-only cap-print text-black">
+        <p className="text-xl font-bold">DRISHTI — Capacity planning one-pager</p>
+        <p className="mt-0.5 text-xs">Generated {new Date().toLocaleString()}</p>
+        <p className="mt-1 text-sm font-semibold">
+          Config: {activePreset ? CAPACITY_PRESETS[activePreset].label : "Custom"} — {cams} camera{cams === 1 ? "" : "s"} ·{" "}
+          {revw} reviewer{revw === 1 ? "" : "s"} · {arr} arrivals/hr
+        </p>
+        <table className="mt-3 w-full border-collapse text-left">
+          <thead>
+            <tr>
+              <th className="border-b-2 border-black px-2 py-1 text-[10px] uppercase tracking-wider">Metric</th>
+              <th className="border-b-2 border-black px-2 py-1 text-[10px] uppercase tracking-wider">Value</th>
+              <th className="border-b-2 border-black px-2 py-1 text-[10px] uppercase tracking-wider">Metric</th>
+              <th className="border-b-2 border-black px-2 py-1 text-[10px] uppercase tracking-wider">Value</th>
+            </tr>
+          </thead>
+          <tbody className="text-xs">
+            <tr>
+              <td className="border-b border-gray-300 px-2 py-1">Patients / day</td>
+              <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">{Math.round(out.patientsPerDay)}</td>
+              <td className="border-b border-gray-300 px-2 py-1">Patients / year</td>
+              <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">{Math.round(out.patientsPerYear).toLocaleString("en-IN")}</td>
+            </tr>
+            <tr>
+              <td className="border-b border-gray-300 px-2 py-1">Mean wait (capture)</td>
+              <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">
+                {out.meanWaitMin >= UNBOUNDED_WAIT ? "unbounded (∞)" : `${out.meanWaitMin.toFixed(1)} min`}
+              </td>
+              <td className="border-b border-gray-300 px-2 py-1">Review wait</td>
+              <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">
+                {out.reviewWaitMin >= UNBOUNDED_WAIT ? "unbounded (∞)" : `${out.reviewWaitMin} min`}
+              </td>
+            </tr>
+            <tr>
+              <td className="border-b border-gray-300 px-2 py-1">Capture utilization</td>
+              <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">{out.utilizationPct}%</td>
+              <td className="border-b border-gray-300 px-2 py-1">Review utilization</td>
+              <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">{out.reviewUtilizationPct}%</td>
+            </tr>
+            <tr>
+              <td className="border-b border-gray-300 px-2 py-1">Mean review-queue length</td>
+              <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">{out.queueLength.toFixed(1)} cases</td>
+              <td className="border-b border-gray-300 px-2 py-1">Districts to 100k / year</td>
+              <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">{to100k.districts}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="mt-3 border-l-4 border-black pl-2 text-xs font-semibold">Bottleneck: {out.bottleneck} — {banner.msg}</p>
+        <p className="mt-4 text-sm font-bold">District scaling — {Math.round(out.patientsPerYear).toLocaleString("en-IN")} patients / year per district</p>
+        <table className="mt-1 w-full border-collapse text-left">
+          <thead>
+            <tr>
+              <th className="border-b-2 border-black px-2 py-1 text-[10px] uppercase tracking-wider">Districts</th>
+              <th className="border-b-2 border-black px-2 py-1 text-[10px] uppercase tracking-wider">Patients / year</th>
+            </tr>
+          </thead>
+          <tbody className="text-xs">
+            {scaling.map((s) => (
+              <tr key={s.districts}>
+                <td className="border-b border-gray-300 px-2 py-1 tabular">{s.districts}</td>
+                <td className="border-b border-gray-300 px-2 py-1 font-semibold tabular">
+                  {Math.round(s.patientsPerYear).toLocaleString("en-IN")}
+                  {s.patientsPerYear >= 100000 ? "  ← 100k reached" : ""}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-4 text-[10px] leading-relaxed">
+          Assumptions: {CAPACITY_PARAMS.captureMinPerPatient} min capture per patient · {CAPACITY_PARAMS.reviewMinPerCase} min reviewer time
+          per case · 35% of cases need human review · {CAPACITY_PARAMS.hoursPerDay} h day · {CAPACITY_PARAMS.workingDays} days/year.
+          M/M/c queueing math — mirrors module5_capacity_planner.py. Simulated planning figures for the SIH 2026 demo.
+        </p>
+      </div>
+
+      <div className="cap-screen-only">
       <SectionHeading
         eyebrow="PLANNING"
         title="Size the camp before you pitch it"
@@ -662,6 +743,15 @@ export default function CapacityView() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={() => window.print()}
+                title={t("cap.print.title")}
+                className="flex min-h-9 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#34D399]/35 hover:text-[#34D399] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Printer className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("cap.print")}
+              </button>
+              <button
+                type="button"
                 onClick={() => void copyShareLink()}
                 title={t("cap.share")}
                 className="flex min-h-9 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#22D3EE]/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -788,6 +878,7 @@ export default function CapacityView() {
           </span>
         </div>
       </Reveal>
+      </div>
     </section>
   );
 }

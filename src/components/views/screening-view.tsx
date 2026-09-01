@@ -232,6 +232,9 @@ export default function ScreeningView() {
   const [errorMsg, setErrorMsg] = useState("");
   const [runNonce, setRunNonce] = useState(0);
   const [recent, setRecent] = useState<RecentRun[] | null>(null);
+  // "Send to review queue" — persisted routing (PATCH → server-side ROUTED audit event)
+  const [queueing, setQueueing] = useState(false);
+  const [queuedFor, setQueuedFor] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -383,6 +386,38 @@ export default function ScreeningView() {
     setAwaiting(false);
     setErrorMsg("");
     setPhase("idle");
+    setQueuedFor(null);
+  };
+
+  /** Persist the routing decision: PATCH status → server appends a ROUTED audit
+   *  event (the case was never signed off, so the status write is a routing).
+   *  The dashboard's register + activity feed pick it up on next refresh. */
+  const handleSendToReview = async () => {
+    if (!result || queueing || queuedFor === result.patient_id) return;
+    if (result.status !== "NEEDS_REVIEW" && result.status !== "URGENT") return;
+    setQueueing(true);
+    try {
+      const res = await fetch(`/api/patients/${encodeURIComponent(result.patient_id)}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: result.status,
+          reviewed_by: "Camp screening desk",
+          note: `Routed to ${result.status === "URGENT" ? "the urgent referral queue" : "the review queue"} from live screening`,
+        }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? `API returned ${res.status}`);
+      }
+      setQueuedFor(result.patient_id);
+      toast.success(t("screen.toastQueued"));
+      loadRecent(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("screen.toastQueueFail"));
+    } finally {
+      setQueueing(false);
+    }
   };
 
   /* ── Derived timeline values (meaningful once a result exists) ── */
@@ -996,14 +1031,27 @@ export default function ScreeningView() {
                     <FileDown className="h-4 w-4" aria-hidden />
                     {t("screen.pdf")}
                   </Button>
-                  <Button
-                    onClick={() => toast.success(t("screen.toastQueued"))}
-                    variant="outline"
-                    className="h-11 flex-1 border-[#22D3EE]/40 font-display font-semibold text-[#22D3EE] hover:bg-[#22D3EE]/10"
-                  >
-                    <Send className="h-4 w-4" aria-hidden />
-                    {t("screen.sendReview")}
-                  </Button>
+                  {(result.status === "NEEDS_REVIEW" || result.status === "URGENT") &&
+                    (queuedFor === result.patient_id ? (
+                      <span
+                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-md border border-[#34D399]/45 bg-[#34D399]/10 font-display text-sm font-semibold text-[#34D399]"
+                        title="Routing decision persisted — the case now sits in the doctor's review queue with a ROUTED audit event"
+                        role="status"
+                      >
+                        <ShieldCheck className="h-4 w-4" aria-hidden />
+                        {t("screen.queuedChip")}
+                      </span>
+                    ) : (
+                      <Button
+                        onClick={() => void handleSendToReview()}
+                        variant="outline"
+                        disabled={queueing}
+                        className="h-11 flex-1 border-[#22D3EE]/40 font-display font-semibold text-[#22D3EE] hover:bg-[#22D3EE]/10 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <Send className={cn("h-4 w-4", queueing && "animate-pulse")} aria-hidden />
+                        {queueing ? t("screen.queuing") : t("screen.sendReview")}
+                      </Button>
+                    ))}
                   <Button
                     onClick={resetAll}
                     variant="outline"

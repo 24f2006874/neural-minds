@@ -125,6 +125,10 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "dash.day.tab": { en: "Day {n}", hi: "दिन {n}" },
   "dash.day.count": { en: "{n} case{s}", hi: "{n} केस" },
   "dash.day.print": { en: "Camp day: {day}", hi: "कैंप दिवस: {day}" },
+  "dash.day.summary": {
+    en: "{count} case{s} · {signed} signed · {referable} referable",
+    hi: "{count} केस · {signed} साइन-ऑफ़ · {referable} रेफरयोग्य",
+  },
 
   // ── reviewing doctor picker ─────────────────────────────────
   "dash.doctor.label": { en: "Reviewing doctor", hi: "समीक्षक डॉक्टर" },
@@ -205,6 +209,12 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "screen.consistency": { en: "Consistency", hi: "संगति" },
   "screen.sendReview": { en: "Send to review queue", hi: "समीक्षा पंक्ति में भेजें" },
   "screen.toastQueued": { en: "Queued for ophthalmologist sign-off", hi: "नेत्र विशेषज्ञ साइन-ऑफ़ के लिए कतार में" },
+  "screen.queuing": { en: "Queueing…", hi: "कतार में भेजा जा रहा है…" },
+  "screen.queuedChip": { en: "Queued for review ✓", hi: "समीक्षा के लिए कतार में ✓" },
+  "screen.toastQueueFail": {
+    en: "Couldn't queue the case — try again",
+    hi: "केस कतार में नहीं जा सका — फिर प्रयास करें",
+  },
   "screen.pdf": { en: "Download report PDF", hi: "रिपोर्ट PDF डाउनलोड करें" },
   "screen.new": { en: "New screening", hi: "नई जांच" },
   "screen.registerStrip": { en: "From the register — tap to re-run", hi: "रजिस्टर से — दोबारा चलाने हेतु टैप करें" },
@@ -273,6 +283,11 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "cap.share": { en: "Copy share link", hi: "शेयर लिंक कॉपी करें" },
   "cap.shareCopied": { en: "Share link copied — config travels in the URL", hi: "शेयर लिंक कॉपी हो गया — कॉन्फ़िग URL में है" },
   "cap.shareFailed": { en: "Could not copy — copy the URL from the address bar", hi: "कॉपी नहीं हुआ — एड्रेस बार से URL कॉपी करें" },
+  "cap.print": { en: "Print one-pager", hi: "एक-पृष्ठ प्रिंट करें" },
+  "cap.print.title": {
+    en: "Print a paper summary of this capacity plan — your browser's print dialog can save it as a PDF",
+    hi: "इस क्षमता योजना का कागज़ी सारांश प्रिंट करें — ब्राउज़र प्रिंट डायलॉग इसे PDF के रूप में सहेज सकता है",
+  },
 };
 
 type Ctx = {
