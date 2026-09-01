@@ -60,6 +60,16 @@ export interface TrustResult {
   route: string;
 }
 
+/** One persisted human-in-the-loop decision (mirrors the audit_log entries
+ *  appended by the sign-off / bulk-signoff / status mutation routes). */
+export interface CaseAuditEvent {
+  at: string; // ISO timestamp
+  action: "SIGNED" | "REOPENED" | "ROUTED";
+  by: string;
+  note: string;
+  status: CaseStatus | string;
+}
+
 export interface ScreeningResult {
   patient_id: string;
   created_at: string;
@@ -71,6 +81,9 @@ export interface ScreeningResult {
   status: CaseStatus;
   report_url: string;
   timings_ms: { gate: number; evidence: number; classify: number; explain: number; total: number };
+  /** Per-case decision trail (last 20 events) — persisted in the details JSON
+   *  by the mutation routes; absent on never-touched cases. */
+  audit_log?: CaseAuditEvent[];
 }
 
 // ────────────────────────────────────────────────────────────

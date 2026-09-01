@@ -1,0 +1,560 @@
+  1240→
+  1241→      {/* 3b ── Mobile cards */}
+  1242→      <div className="mt-4 grid gap-3 print:hidden md:hidden">
+  1243→        {rowsError ? (
+  1244→          <GlassCard className="p-0">
+  1245→            <QueueError message={rowsError} onRetry={() => void loadAll()} />
+  1246→          </GlassCard>
+  1247→        ) : rowsLoading || !rows ? (
+  1248→          Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton-shimmer h-28 w-full rounded-xl" />)
+  1249→        ) : visibleRows.length === 0 ? (
+  1250→          <GlassCard className="p-0">
+  1251→            <EmptyQueue onLaunch={() => navigate("screening")} searching={query.trim() !== ""} query={query.trim()} />
+  1252→          </GlassCard>
+  1253→        ) : (
+  1254→          visibleRows.map((r) => {
+  1255→            const gColor = rowGradeColor(r);
+  1256→            const selectable = isSignable(r);
+  1257→            const isSelected = selected.has(r.patient_id);
+  1258→            return (
+  1259→              <GlassCard
+  1260→                key={r.id}
+  1261→                className={cn(
+  1262→                  "p-3",
+  1263→                  !selectable && "glass-card-hover cursor-pointer"
+  1264→                )}
+  1265→                {...(!selectable ? { hover: true } : {})}
+  1266→              >
+  1267→                <div className="flex items-start gap-2.5">
+  1268→                  {selectable ? (
+  1269→                    <div className="flex h-6 items-center" onClick={(e) => e.stopPropagation()}>
+  1270→                      <Checkbox
+  1271→                        checked={isSelected}
+  1272→                        onCheckedChange={() => toggleSelect(r.patient_id)}
+  1273→                        aria-label={`Select ${r.patient_id} for sign-off`}
+  1274→                        className="h-4 w-4 border-white/30 bg-white/[0.04] data-[state=checked]:border-[#34D399] data-[state=checked]:bg-[#34D399] data-[state=checked]:text-[#05261B]"
+  1275→                      />
+  1276→                    </div>
+  1277→                  ) : null}
+  1278→                  <button
+  1279→                    type="button"
+  1280→                    className={cn(
+  1281→                      "w-full min-w-0 text-left",
+  1282→                      selectable && "glass-card-hover cursor-pointer rounded-lg"
+  1283→                    )}
+  1284→                    aria-label={`Open report for ${r.patient_id}`}
+  1285→                    onClick={() => openReport(r.patient_id)}
+  1286→                  >
+  1287→                  <div className="flex items-start justify-between gap-2">
+  1288→                    <div className="min-w-0">
+  1289→                      <p className="font-display font-semibold text-foreground">{r.patient_id}</p>
+  1290→                      <p className="tabular mt-0.5 text-xs text-muted-foreground">{fmtDate(r.created_at)}</p>
+  1291→                    </div>
+  1292→                    <TrustChip level={r.trust_level} />
+  1293→                  </div>
+  1294→                  <div className="mt-3 flex flex-wrap items-center gap-2">
+  1295→                    <span
+  1296→                      className={cn(
+  1297→                        "chip",
+  1298→                        !gColor && "border-white/25 text-muted-foreground"
+  1299→                      )}
+  1300→                      style={gColor ? { borderColor: `${gColor}55`, color: gColor } : undefined}
+  1301→                    >
+  1302→                      {gColor && <span className="h-1.5 w-1.5 rounded-full" style={{ background: gColor }} aria-hidden="true" />}
+  1303→                      {r.grade || "—"}
+  1304→                    </span>
+  1305→                    <StatusChip status={r.status} />
+  1306→                    {r.reviewed_by && (
+  1307→                      <span
+  1308→                        className="chip border-[#34D399]/45 bg-[#0A2E24]/70 text-[#34D399]"
+  1309→                        title={`Signed off by ${r.reviewed_by}${r.reviewed_at ? ` · ${fmtDate(r.reviewed_at)}` : ""}`}
+  1310→                      >
+  1311→                        <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+  1312→                        {t("dash.signedChip")}
+  1313→                      </span>
+  1314→                    )}
+  1315→                    {r.dme_risk && (
+  1316→                      <span className="chip border-[#F87171]/40 text-[#F87171]">
+  1317→                        <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+  1318→                        DME
+  1319→                      </span>
+  1320→                    )}
+  1321→                  </div>
+  1322→                  <div className="tabular mt-2.5 flex gap-4 text-xs text-muted-foreground">
+  1323→                    <span>Conf {(r.confidence * 100).toFixed(1)}%</span>
+  1324→                    <span>{(r.processing_ms / 1000).toFixed(1)}s</span>
+  1325→                  </div>
+  1326→                  </button>
+  1327→                </div>
+  1328→              </GlassCard>
+  1329→            );
+  1330→          })
+  1331→        )}
+  1332→      </div>
+  1333→
+  1334→      {/* 3c ── Bulk selection action bar */}
+  1335→      {selectedIds.length > 0 && (
+  1336→        <div
+  1337→          className="pointer-events-none fixed inset-x-0 bottom-28 z-40 flex justify-center px-4 print:hidden sm:bottom-8"
+  1338→          role="region"
+  1339→          aria-label="Bulk sign-off actions"
+  1340→        >
+  1341→          <div className="rise-in pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-2xl border border-[#34D399]/35 bg-[#0B1526]/95 p-3 shadow-[0_10px_44px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:w-auto">
+  1342→            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#34D399]/40 bg-[#34D399]/10 text-[#34D399]">
+  1343→              <ListChecks className="h-4.5 w-4.5" aria-hidden="true" />
+  1344→            </span>
+  1345→            <div className="min-w-0 flex-1 sm:flex-none">
+  1346→              <p className="tabular text-sm font-semibold leading-tight text-foreground">
+  1347→                {selectedIds.length} {selectedIds.length === 1 ? t("dash.bulk.selected") : t("dash.bulk.selectedPlural")}
+  1348→              </p>
+  1349→              <p className="truncate text-[11px] text-muted-foreground">
+  1350→                {t("dash.bulk.ready")}
+  1351→              </p>
+  1352→            </div>
+  1353→            <div className="ml-auto flex shrink-0 items-center gap-2">
+  1354→              <Button
+  1355→                size="sm"
+  1356→                className="min-h-10 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B]"
+  1357→                onClick={() => setBulkConfirmOpen(true)}
+  1358→              >
+  1359→                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+  1360→                {t("dash.bulk.signAll")}
+  1361→              </Button>
+  1362→              <Button
+  1363→                size="sm"
+  1364→                variant="ghost"
+  1365→                className="min-h-10 px-2.5 text-muted-foreground hover:text-foreground"
+  1366→                onClick={() => setSelected(new Set())}
+  1367→                aria-label="Clear selection"
+  1368→                title="Clear selection"
+  1369→              >
+  1370→                <X className="h-4 w-4" aria-hidden="true" />
+  1371→              </Button>
+  1372→            </div>
+  1373→          </div>
+  1374→        </div>
+  1375→      )}
+  1376→
+  1377→      {/* 3d ── Register activity timeline (audit trail) */}
+  1378→      <Reveal delay={0.2} className="mt-8 print:hidden">
+  1379→        <GlassCard className="p-4 sm:p-6">
+  1380→          <div className="flex flex-wrap items-start justify-between gap-3">
+  1381→            <div className="flex items-start gap-3">
+  1382→              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#22D3EE]/30 bg-[#22D3EE]/10 text-[#22D3EE]">
+  1383→                <History className="h-4.5 w-4.5" aria-hidden="true" />
+  1384→              </span>
+  1385→              <div>
+  1386→                <p className="font-display text-base font-semibold text-foreground">{t("dash.activity.title")}</p>
+  1387→                <p className="text-xs text-muted-foreground">{t("dash.activity.sub")}</p>
+  1388→              </div>
+  1389→            </div>
+  1390→            <button
+  1391→              type="button"
+  1392→              onClick={() => void loadAudit()}
+  1393→              disabled={auditLoading}
+  1394→              aria-label={t("dash.activity.refresh")}
+  1395→              title={t("dash.activity.refresh")}
+  1396→              className="flex min-h-10 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-[#22D3EE]/40 hover:text-[#22D3EE] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+  1397→            >
+  1398→              <RefreshCw className={cn("h-3.5 w-3.5", auditLoading && "animate-spin")} aria-hidden="true" />
+  1399→              {t("dash.activity.refresh")}
+  1400→            </button>
+  1401→          </div>
+  1402→
+  1403→          <div className="drishti-scroll mt-4 max-h-96 overflow-y-auto pr-1">
+  1404→            {auditError ? (
+  1405→              <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+  1406→                <TriangleAlert className="h-5 w-5 text-[#F87171]" aria-hidden="true" />
+  1407→                <p className="text-sm text-muted-foreground">{t("dash.activity.error")}</p>
+  1408→                <Button
+  1409→                  size="sm"
+  1410→                  variant="outline"
+  1411→                  className="min-h-10 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+  1412→                  onClick={() => void loadAudit()}
+  1413→                >
+  1414→                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+  1415→                  {t("dash.retry")}
+  1416→                </Button>
+  1417→              </div>
+  1418→            ) : auditLoading && !auditEvents ? (
+  1419→              <div className="ml-3 space-y-3 border-l border-white/10 py-1 pl-6">
+  1420→                {Array.from({ length: 4 }).map((_, i) => (
+  1421→                  <div key={i} className="skeleton-shimmer h-12 w-full rounded-lg" />
+  1422→                ))}
+  1423→              </div>
+  1424→            ) : !auditEvents || auditEvents.length === 0 ? (
+  1425→              <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+  1426→                <History className="h-6 w-6 text-[#22D3EE]/50" aria-hidden="true" />
+  1427→                <p className="text-sm text-muted-foreground">{t("dash.activity.empty")}</p>
+  1428→              </div>
+  1429→            ) : (
+  1430→              <ol className="relative ml-3 space-y-1 border-l border-white/10 pl-6" aria-label={t("dash.activity.title")}>
+  1431→                {auditEvents.map((ev, i) => {
+  1432→                  const meta =
+  1433→                    ev.action === "SIGNED"
+  1434→                      ? { icon: ShieldCheck, cls: "border-[#34D399]/50 bg-[#0A2E24] text-[#34D399]", label: t("dash.activity.signed") }
+  1435→                      : ev.action === "REOPENED"
+  1436→                        ? { icon: Undo2, cls: "border-[#FBBF24]/50 bg-[#2A2210] text-[#FBBF24]", label: t("dash.activity.reopened") }
+  1437→                        : { icon: ArrowRightLeft, cls: "border-[#22D3EE]/50 bg-[#0A1B2E] text-[#22D3EE]", label: t("dash.activity.routed") };
+  1438→                  const Icon = meta.icon;
+  1439→                  return (
+  1440→                    <li
+  1441→                      key={`${ev.patient_id}-${ev.at}-${i}`}
+  1442→                      className="group relative rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.03]"
+  1443→                    >
+  1444→                      <span
+  1445→                        className={cn(
+  1446→                          "absolute -left-[33px] top-3 flex h-5.5 w-5.5 items-center justify-center rounded-full border",
+  1447→                          meta.cls
+  1448→                        )}
+  1449→                        aria-hidden="true"
+  1450→                      >
+  1451→                        <Icon className="h-3 w-3" />
+  1452→                      </span>
+  1453→                      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+  1454→                        <button
+  1455→                          type="button"
+  1456→                          onClick={() => openReport(ev.patient_id)}
+  1457→                          title={t("dash.activity.openCase")}
+  1458→                          className="font-display text-sm font-semibold text-foreground underline-offset-4 hover:text-[#22D3EE] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+  1459→                        >
+  1460→                          {ev.patient_id}
+  1461→                        </button>
+  1462→                        <span className={cn("text-xs font-semibold", meta.cls.split(" ").pop())}>{meta.label}</span>
+  1463→                        <span className="text-[11px] text-muted-foreground">
+  1464→                          {ev.by.split(" (")[0]}
+  1465→                        </span>
+  1466→                        <span className="tabular ml-auto text-[11px] text-muted-foreground">{fmtDate(ev.at)}</span>
+  1467→                      </div>
+  1468→                      {ev.note && (
+  1469→                        <p className="mt-1 text-xs leading-snug text-muted-foreground/85" title={ev.note}>
+  1470→                          {ev.note}
+  1471→                        </p>
+  1472→                      )}
+  1473→                    </li>
+  1474→                  );
+  1475→                })}
+  1476→              </ol>
+  1477→            )}
+  1478→          </div>
+  1479→          {!auditError && auditEvents && auditEvents.length > 0 && auditTotal > auditEvents.length && (
+  1480→            <p className="mt-3 text-[11px] text-muted-foreground">
+  1481→              {t("dash.activity.showing", { n: auditEvents.length, total: auditTotal })}
+  1482→            </p>
+  1483→          )}
+  1484→        </GlassCard>
+  1485→      </Reveal>
+  1486→
+  1487→      {/* 4 ── Report modal */}
+  1488→      <Dialog open={openId !== null} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
+  1489→        <DialogContent
+  1490→          aria-describedby={undefined}
+  1491→          className={cn(
+  1492→            "max-h-[85vh] max-w-4xl gap-0 overflow-y-auto overflow-x-hidden border-[#22D3EE]/25 bg-[#0B1526]/95 p-0 backdrop-blur-xl sm:max-w-4xl drishti-scroll"
+  1493→          )}
+  1494→        >
+  1495→          {detailLoading && <ModalSkeleton />}
+  1496→
+  1497→          {!detailLoading && detailError && (
+  1498→            <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+  1499→              <TriangleAlert className="h-6 w-6 text-[#F87171]" aria-hidden="true" />
+  1500→              <p className="text-sm font-medium text-foreground">Couldn&apos;t load the report</p>
+  1501→              <p className="text-xs text-muted-foreground">{detailError}</p>
+  1502→              <Button
+  1503→                size="sm"
+  1504→                variant="outline"
+  1505→                className="min-h-11 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+  1506→                onClick={() => setDetailNonce((n) => n + 1)}
+  1507→              >
+  1508→                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+  1509→                Retry
+  1510→              </Button>
+  1511→            </div>
+  1512→          )}
+  1513→
+  1514→          {!detailLoading && !detailError && detailResult && openId && (
+  1515→            <>
+  1516→              <div className="px-6 pt-6">
+  1517→                <DialogHeader>
+  1518→                  <DialogTitle className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-display text-xl">
+  1519→                    <span>{detailResult.patient_id}</span>
+  1520→                    {(() => {
+  1521→                      const gc =
+  1522→                        detailResult.status === "REJECTED" || detailResult.classification.class_level < 0
+  1523→                          ? undefined
+  1524→                          : icdrColor(detailResult.classification.class_level);
+  1525→                      return (
+  1526→                        <span
+  1527→                          className={cn("text-sm font-semibold", !gc && "text-muted-foreground")}
+  1528→                          style={gc ? { color: gc } : undefined}
+  1529→                        >
+  1530→                          {detailResult.classification.predicted_class || "—"}
+  1531→                        </span>
+  1532→                      );
+  1533→                    })()}
+  1534→                  </DialogTitle>
+  1535→                  <DialogDescription className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+  1536→                    <span className="tabular">Screened {fmtDate(detailResult.created_at)}</span>
+  1537→                    <span aria-hidden="true">·</span>
+  1538→                    <StatusChip status={detailResult.status} />
+  1539→                    <TrustChip level={detailResult.trust.trust_level} />
+  1540→                  </DialogDescription>
+  1541→                </DialogHeader>
+  1542→              </div>
+  1543→
+  1544→              <div className="grid gap-6 p-6 lg:grid-cols-2">
+  1545→                {/* LEFT — retina + evidence overlay */}
+  1546→                <div className="space-y-3">
+  1547→                  <div className="overflow-hidden rounded-xl border border-[#22D3EE]/20">
+  1548→                    <RetinaView
+  1549→                      severity={
+  1550→                        isRejected ? 0 : Math.max(0, Math.min(4, detailResult.classification.class_level))
+  1551→                      }
+  1552→                      dmeRisk={detailResult.evidence.dme_risk}
+  1553→                      lesions={detailResult.evidence.lesions}
+  1554→                      gradcam={detailResult.evidence.gradcam}
+  1555→                      layers={{ vessels: true, ma: true, hem: true, ex: true, dme: true, gradcam: true }}
+  1556→                      rejected={isRejected}
+  1557→                      className="aspect-square w-full"
+  1558→                    />
+  1559→                  </div>
+  1560→                  <div className="flex flex-wrap gap-1.5" aria-label="Evidence overlay legend">
+  1561→                    {LEGEND.map((l) => (
+  1562→                      <span
+  1563→                        key={l.label}
+  1564→                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+  1565→                      >
+  1566→                        <span className="h-2 w-2 rounded-full" style={{ background: l.color }} aria-hidden="true" />
+  1567→                        {l.label}
+  1568→                      </span>
+  1569→                    ))}
+  1570→                  </div>
+  1571→                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+  1572→                    Grad-CAM highlights the regions that drove the CNN decision — the model attends to lesions, not
+  1573→                    artifacts.
+  1574→                  </p>
+  1575→                </div>
+  1576→
+  1577→                {/* RIGHT — trust breakdown */}
+  1578→                <div className="space-y-5">
+  1579→                  <div className="flex items-center gap-5">
+  1580→                    <ScoreDial
+  1581→                      value={detailResult.trust.trust_score}
+  1582→                      size={128}
+  1583→                      label={t("screen.trustScore")}
+  1584→                      sublabel={detailResult.trust.trust_level}
+  1585→                    />
+  1586→                    <div className="min-w-0 space-y-2">
+  1587→                      <TrustChip level={detailResult.trust.trust_level} />
+  1588→                      <p className="text-sm leading-snug text-muted-foreground">{detailResult.trust.route}</p>
+  1589→                    </div>
+  1590→                  </div>
+  1591→
+  1592→                  <div className="flex items-center justify-around rounded-xl border border-white/10 bg-white/[0.02] p-4">
+  1593→                    <ScoreDial value={detailResult.gate.quality_score} size={90} label={t("screen.quality")} />
+  1594→                    <ScoreDial value={detailResult.explainability.consistency} size={90} label={t("screen.consistency")} />
+  1595→                  </div>
+  1596→
+  1597→                  <div className="grid grid-cols-3 gap-2">
+  1598→                    <LesionStat count={detailResult.evidence.ma_count} label="MA" color="#e0331f" />
+  1599→                    <LesionStat count={detailResult.evidence.hem_count} label="HEM" color="#9b1c1c" />
+  1600→                    <LesionStat count={detailResult.evidence.ex_count} label="EX" color="#f2d66c" />
+  1601→                  </div>
+  1602→
+  1603→                  {!isRejected ? (
+  1604→                    <div className="space-y-2.5">
+  1605→                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+  1606→                        Class probabilities — top 3
+  1607→                      </p>
+  1608→                      {Object.entries(detailResult.classification.probabilities)
+  1609→                        .sort((a, b) => b[1] - a[1])
+  1610→                        .slice(0, 3)
+  1611→                        .map(([label, value], i) => (
+  1612→                          <ConfBar
+  1613→                            key={label}
+  1614→                            label={label}
+  1615→                            value={value}
+  1616→                            color={icdrColor(ICDR_CLASSES.find((c) => c.short === label)?.level ?? -1) ?? "#22D3EE"}
+  1617→                            active={label === detailResult.classification.predicted_class}
+  1618→                            delay={i * 90}
+  1619→                          />
+  1620→                        ))}
+  1621→                    </div>
+  1622→                  ) : (
+  1623→                    <div className="flex items-start gap-2 rounded-lg border border-[#F87171]/40 bg-[#2E0F12]/70 p-3">
+  1624→                      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#F87171]" aria-hidden="true" />
+  1625→                      <div>
+  1626→                        <p className="text-sm font-semibold text-[#F87171]">Image failed the quality gate</p>
+  1627→                        <p className="text-xs text-[#F8A5A5]/80">{detailResult.gate.message}</p>
+  1628→                      </div>
+  1629→                    </div>
+  1630→                  )}
+  1631→
+  1632→                  {detailResult.evidence.dme_risk && !isRejected && (
+  1633→                    <div className="flex items-start gap-2 rounded-lg border border-[#F87171]/40 bg-[#2E0F12]/70 p-3">
+  1634→                      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#F87171]" aria-hidden="true" />
+  1635→                      <div>
+  1636→                        <p className="text-sm font-semibold text-[#F87171]">DME risk flagged</p>
+  1637→                        <p className="text-xs text-[#F8A5A5]/80">{detailResult.evidence.dme_message}</p>
+  1638→                      </div>
+  1639→                    </div>
+  1640→                  )}
+  1641→
+  1642→                  <div className="flex flex-wrap gap-1.5">
+  1643→                    {TIMING_KEYS.map((k) => (
+  1644→                      <span
+  1645→                        key={k}
+  1646→                        className="chip border-white/10 bg-white/[0.03] text-muted-foreground"
+  1647→                      >
+  1648→                        {k}
+  1649→                        <span className="tabular">{detailResult.timings_ms[k]}ms</span>
+  1650→                      </span>
+  1651→                    ))}
+  1652→                  </div>
+  1653→                </div>
+  1654→              </div>
+  1655→
+  1656→              <DialogFooter className="flex-col gap-3 border-t border-white/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+  1657→                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+  1658→                  <Info className="h-3.5 w-3.5" aria-hidden="true" />
+  1659→                  Demo data — simulated case
+  1660→                </p>
+  1661→                <div className="flex flex-col gap-2 sm:flex-row">
+  1662→                  <Button
+  1663→                    variant="outline"
+  1664→                    className="min-h-11 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+  1665→                    onClick={() => downloadReportPdf(detailResult)}
+  1666→                  >
+  1667→                    <Download className="h-4 w-4" aria-hidden="true" />
+  1668→                    {t("dash.pdf")}
+  1669→                  </Button>
+  1670→                  {isSignedOffHere && openId ? (
+  1671→                    <span className="flex flex-col gap-2 sm:flex-row sm:items-center">
+  1672→                      <span
+  1673→                        className="chip min-h-11 border-[#34D399]/40 bg-[#0A2E24]/60 text-[#34D399]"
+  1674→                        title={reviewNoteText}
+  1675→                      >
+  1676→                        <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+  1677→                        Signed off · {(signedOff[openId]?.by ?? detail?.reviewed_by ?? "").split(" (")[0]}
+  1678→                        {reviewedAtText ? ` · ${reviewedAtText}` : ""}
+  1679→                      </span>
+  1680→                      <Button
+  1681→                        variant="outline"
+  1682→                        className="min-h-11 border-white/15 px-3 text-xs text-muted-foreground hover:border-[#FBBF24]/50 hover:text-[#FBBF24]"
+  1683→                        title="Clear the sign-off and return this case to the review queue"
+  1684→                        onClick={() => setReopenTarget(openId)}
+  1685→                        disabled={signingOff === openId}
+  1686→                      >
+  1687→                        <Undo2 className="h-4 w-4" aria-hidden="true" />
+  1688→                        {signingOff === openId ? t("dash.reopening") : t("dash.undo")}
+  1689→                      </Button>
+  1690→                    </span>
+  1691→                  ) : canSign && openId ? (
+  1692→                    <Button
+  1693→                      className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B] disabled:opacity-60"
+  1694→                      onClick={() => void handleSignOff(openId)}
+  1695→                      disabled={signingOff === openId}
+  1696→                    >
+  1697→                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+  1698→                      {signingOff === openId ? t("dash.signingOff") : t("dash.signOff")}
+  1699→                    </Button>
+  1700→                  ) : null}
+  1701→                </div>
+  1702→              </DialogFooter>
+  1703→            </>
+  1704→          )}
+  1705→        </DialogContent>
+  1706→      </Dialog>
+  1707→
+  1708→      {/* 5 ── Reopen (undo sign-off) confirmation */}
+  1709→      <AlertDialog open={reopenTarget !== null} onOpenChange={(o) => { if (!o) setReopenTarget(null); }}>
+  1710→        <AlertDialogContent className="border-[#FBBF24]/30 bg-[#0B1526]/95 backdrop-blur-xl">
+  1711→          <AlertDialogHeader>
+  1712→            <AlertDialogTitle className="font-display text-lg">
+  1713→              {t("dash.reopen.title", { id: reopenTarget ?? "" })}
+  1714→            </AlertDialogTitle>
+  1715→            <AlertDialogDescription className="text-sm leading-relaxed text-muted-foreground">
+  1716→              {t("dash.reopen.body.a")}
+  1717→              <span className="font-semibold text-[#FBBF24]">
+  1718→                {reopenTarget && signedOff[reopenTarget]?.previousStatus === "URGENT"
+  1719→                  ? t("dash.reopen.queueUrgent")
+  1720→                  : t("dash.reopen.queueReview")}
+  1721→              </span>
+  1722→              {t("dash.reopen.body.b")}
+  1723→            </AlertDialogDescription>
+  1724→          </AlertDialogHeader>
+  1725→          <AlertDialogFooter>
+  1726→            <AlertDialogCancel className="min-h-11 border-white/15 bg-transparent hover:bg-white/5 hover:text-foreground">
+  1727→              {t("dash.reopen.keep")}
+  1728→            </AlertDialogCancel>
+  1729→            <AlertDialogAction
+  1730→              className="min-h-11 bg-[#FBBF24] font-semibold text-[#2A2210] hover:bg-[#EAB308]"
+  1731→              onClick={(e) => {
+  1732→                e.preventDefault();
+  1733→                if (reopenTarget) void handleReopen(reopenTarget);
+  1734→              }}
+  1735→            >
+  1736→              <Undo2 className="h-4 w-4" aria-hidden="true" />
+  1737→              {t("dash.reopen.confirm")}
+  1738→            </AlertDialogAction>
+  1739→          </AlertDialogFooter>
+  1740→        </AlertDialogContent>
+  1741→      </AlertDialog>
+  1742→      {/* 6 ── Bulk sign-off confirmation */}
+  1743→      <AlertDialog open={bulkConfirmOpen} onOpenChange={setBulkConfirmOpen}>
+  1744→        <AlertDialogContent className="border-[#34D399]/30 bg-[#0B1526]/95 backdrop-blur-xl">
+  1745→          <AlertDialogHeader>
+  1746→            <AlertDialogTitle className="font-display text-lg">
+  1747→              {selectedIds.length === 1 ? t("dash.bulk.titleOne") : t("dash.bulk.titleMany", { n: selectedIds.length })}
+  1748→            </AlertDialogTitle>
+  1749→            <AlertDialogDescription className="text-sm leading-relaxed text-muted-foreground">
+  1750→              {t("dash.bulk.body.a")}
+  1751→              <span className="font-semibold text-[#34D399]">{t("dash.bulk.body.hl")}</span>
+  1752→              {t("dash.bulk.body.b")}
+  1753→              <span className="tabular text-foreground">
+  1754→                {selectedIds.slice(0, 4).join(", ")}
+  1755→                {selectedIds.length > 4 ? ` + ${selectedIds.length - 4} more` : ""}
+  1756→              </span>
+  1757→              {t("dash.bulk.body.c")}
+  1758→            </AlertDialogDescription>
+  1759→          </AlertDialogHeader>
+  1760→          <div className="space-y-1.5">
+  1761→            <label htmlFor="bulk-note" className="text-xs font-medium text-foreground">
+  1762→              {t("dash.bulk.noteLabel")}
+  1763→            </label>
+  1764→            <Textarea
+  1765→              id="bulk-note"
+  1766→              value={bulkNote}
+  1767→              onChange={(e) => setBulkNote(e.target.value)}
+  1768→              placeholder={t("dash.bulk.notePlaceholder")}
+  1769→              rows={2}
+  1770→              maxLength={400}
+  1771→              disabled={bulkBusy}
+  1772→              className="resize-none border-white/15 bg-white/[0.03] text-sm placeholder:text-muted-foreground/60 focus-visible:border-[#22D3EE]/50 focus-visible:ring-[#22D3EE]/25"
+  1773→            />
+  1774→          </div>
+  1775→          <AlertDialogFooter>
+  1776→            <AlertDialogCancel
+  1777→              className="min-h-11 border-white/15 bg-transparent hover:bg-white/5 hover:text-foreground"
+  1778→              disabled={bulkBusy}
+  1779→            >
+  1780→              {t("dash.bulk.cancel")}
+  1781→            </AlertDialogCancel>
+  1782→            <AlertDialogAction
+  1783→              className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B]"
+  1784→              disabled={bulkBusy}
+  1785→              onClick={(e) => {
+  1786→                e.preventDefault();
+  1787→                void handleBulkSignOff();
+  1788→              }}
+  1789→            >
+  1790→              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+  1791→              {bulkBusy ? t("dash.bulk.signing") : t("dash.bulk.confirm", { n: selectedIds.length })}
+  1792→            </AlertDialogAction>
+  1793→          </AlertDialogFooter>
+  1794→        </AlertDialogContent>
+  1795→      </AlertDialog>
+  1796→    </section>
+  1797→  );
+  1798→}
+  1799→

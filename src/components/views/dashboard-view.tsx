@@ -58,7 +58,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ICDR_CLASSES, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
+import { ICDR_CLASSES, type CaseAuditEvent, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
 import { useLang } from "@/lib/i18n";
 import { downloadRegisterPdf, downloadReportPdf, type RegisterRow } from "@/lib/report-pdf";
 import { cn } from "@/lib/utils";
@@ -149,8 +149,8 @@ const FILTER_TABS: Array<{ key: FilterKey; label: string }> = [
   { key: "rejected", label: "Rejected" },
 ];
 
-const LEGEND: Array<{ label: string; color: string }> = [
-  { label: "Vessels", color: "#b3402e" },
+const LEGEND: Array<{ label: string; color: string; i18nKey?: string }> = [
+  { label: "Vessels", color: "#b3402e", i18nKey: "leg.vessels" },
   { label: "MA", color: "#e0331f" },
   { label: "HEM", color: "#9b1c1c" },
   { label: "EX", color: "#f2d66c" },
@@ -163,6 +163,12 @@ const TIMING_KEYS = ["gate", "evidence", "classify", "explain", "total"] as cons
 // ────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────
+
+/** Append a decision to the per-case audit trail (optimistic UI mirror of the
+ *  server's withAuditEvent — keeps the modal history live without a refetch). */
+function appendAuditEvent(log: CaseAuditEvent[] | undefined, event: CaseAuditEvent): CaseAuditEvent[] {
+  return [...(log ?? []), event].slice(-20);
+}
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -674,7 +680,23 @@ export default function DashboardView() {
       setRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
       setDetail((prev) =>
         prev && prev.details
-          ? { ...prev, status: "AUTO_CLEARED", reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, details: { ...prev.details, status: "AUTO_CLEARED" } }
+          ? {
+              ...prev,
+              status: "AUTO_CLEARED",
+              reviewed_by: data.reviewed_by,
+              reviewed_at: data.reviewed_at,
+              details: {
+                ...prev.details,
+                status: "AUTO_CLEARED",
+                audit_log: appendAuditEvent(prev.details.audit_log, {
+                  at: new Date().toISOString(),
+                  action: "SIGNED",
+                  by: data.reviewed_by,
+                  note: `Signed off by ${data.reviewed_by}`,
+                  status: "AUTO_CLEARED",
+                }),
+              },
+            }
           : prev
       );
       // quiet refresh of stats + counts (list already flipped optimistically)
@@ -726,7 +748,23 @@ export default function DashboardView() {
       setRows((prev) => (prev ? prev.map(flip) : prev));
       setDetail((prev) =>
         prev && prev.details
-          ? { ...prev, status: previousStatus, reviewed_by: null, reviewed_at: null, details: { ...prev.details, status: previousStatus } }
+          ? {
+              ...prev,
+              status: previousStatus,
+              reviewed_by: null,
+              reviewed_at: null,
+              details: {
+                ...prev.details,
+                status: previousStatus,
+                audit_log: appendAuditEvent(prev.details.audit_log, {
+                  at: new Date().toISOString(),
+                  action: "REOPENED",
+                  by: "Dr. Review (dashboard demo)",
+                  note: `Sign-off reopened by Dr. Review — case returned to the ${previousStatus === "URGENT" ? "urgent" : "review"} queue`,
+                  status: previousStatus,
+                }),
+              },
+            }
           : prev
       );
       // quiet refresh of stats + counts (list already flipped optimistically)
@@ -1259,11 +1297,19 @@ export default function DashboardView() {
               <GlassCard
                 key={r.id}
                 className={cn(
-                  "p-3",
+                  "relative overflow-hidden p-3",
                   !selectable && "glass-card-hover cursor-pointer"
                 )}
                 {...(!selectable ? { hover: true } : {})}
               >
+                {/* grade-color spine — scannable severity cue on mobile */}
+                {gColor && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-y-2 left-0 w-[3px] rounded-full"
+                    style={{ background: gColor, opacity: 0.8, boxShadow: `0 0 8px ${gColor}66` }}
+                  />
+                )}
                 <div className="flex items-start gap-2.5">
                   {selectable ? (
                     <div className="flex h-6 items-center" onClick={(e) => e.stopPropagation()}>
@@ -1444,7 +1490,8 @@ export default function DashboardView() {
                       <span
                         className={cn(
                           "absolute -left-[33px] top-3 flex h-5.5 w-5.5 items-center justify-center rounded-full border",
-                          meta.cls
+                          meta.cls,
+                          i === 0 && "animate-pulse"
                         )}
                         aria-hidden="true"
                       >
@@ -1489,9 +1536,17 @@ export default function DashboardView() {
         <DialogContent
           aria-describedby={undefined}
           className={cn(
-            "max-h-[85vh] max-w-4xl gap-0 overflow-y-auto overflow-x-hidden border-[#22D3EE]/25 bg-[#0B1526]/95 p-0 backdrop-blur-xl sm:max-w-4xl drishti-scroll"
+            "card-accent-top max-h-[85vh] max-w-4xl gap-0 overflow-y-auto overflow-x-hidden border-[#22D3EE]/25 bg-[#0B1526]/95 p-0 backdrop-blur-xl sm:max-w-4xl drishti-scroll"
           )}
         >
+          {/* a11y: loading/error branches render no visible DialogTitle —
+              provide a screen-reader one so Radix never renders a title-less dialog */}
+          {(detailLoading || detailError) && (
+            <DialogHeader className="sr-only">
+              <DialogTitle>{openId ?? ""}</DialogTitle>
+              <DialogDescription>{detailError ? "Report failed to load" : "Loading report"}</DialogDescription>
+            </DialogHeader>
+          )}
           {detailLoading && <ModalSkeleton />}
 
           {!detailLoading && detailError && (
@@ -1561,16 +1616,15 @@ export default function DashboardView() {
                     {LEGEND.map((l) => (
                       <span
                         key={l.label}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-white/25 hover:text-foreground"
                       >
                         <span className="h-2 w-2 rounded-full" style={{ background: l.color }} aria-hidden="true" />
-                        {l.label}
+                        {l.i18nKey ? t(l.i18nKey) : l.label}
                       </span>
                     ))}
                   </div>
                   <p className="text-[11px] leading-relaxed text-muted-foreground">
-                    Grad-CAM highlights the regions that drove the CNN decision — the model attends to lesions, not
-                    artifacts.
+                    {t("dash.gradcamNote")}
                   </p>
                 </div>
 
@@ -1603,7 +1657,7 @@ export default function DashboardView() {
                   {!isRejected ? (
                     <div className="space-y-2.5">
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Class probabilities — top 3
+                        {t("dash.cnnTop3")}
                       </p>
                       {Object.entries(detailResult.classification.probabilities)
                         .sort((a, b) => b[1] - a[1])
@@ -1623,7 +1677,7 @@ export default function DashboardView() {
                     <div className="flex items-start gap-2 rounded-lg border border-[#F87171]/40 bg-[#2E0F12]/70 p-3">
                       <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#F87171]" aria-hidden="true" />
                       <div>
-                        <p className="text-sm font-semibold text-[#F87171]">Image failed the quality gate</p>
+                        <p className="text-sm font-semibold text-[#F87171]">{t("dash.gateFailed")}</p>
                         <p className="text-xs text-[#F8A5A5]/80">{detailResult.gate.message}</p>
                       </div>
                     </div>
@@ -1633,7 +1687,7 @@ export default function DashboardView() {
                     <div className="flex items-start gap-2 rounded-lg border border-[#F87171]/40 bg-[#2E0F12]/70 p-3">
                       <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#F87171]" aria-hidden="true" />
                       <div>
-                        <p className="text-sm font-semibold text-[#F87171]">DME risk flagged</p>
+                        <p className="text-sm font-semibold text-[#F87171]">{t("dash.dmeFlagged")}</p>
                         <p className="text-xs text-[#F8A5A5]/80">{detailResult.evidence.dme_message}</p>
                       </div>
                     </div>
@@ -1653,10 +1707,69 @@ export default function DashboardView() {
                 </div>
               </div>
 
+              {/* per-case audit history — every persisted decision for THIS case */}
+              {(() => {
+                const log = [...(detailResult.audit_log ?? [])].reverse();
+                return (
+                  <div className="border-t border-white/10 px-6 py-4">
+                    <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      <History className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t("dash.caseAudit.title")}
+                      {log.length > 0 && (
+                        <span className="tabular rounded-full bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                          {log.length}
+                        </span>
+                      )}
+                    </p>
+                    {log.length === 0 ? (
+                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground/80">{t("dash.caseAudit.empty")}</p>
+                    ) : (
+                      <ol className="mt-3 space-y-2.5">
+                        {log.map((ev, i) => {
+                          const meta =
+                            ev.action === "SIGNED"
+                              ? { icon: ShieldCheck, cls: "border-[#34D399]/50 bg-[#0A2E24] text-[#34D399]", label: t("dash.activity.signed") }
+                              : ev.action === "REOPENED"
+                                ? { icon: Undo2, cls: "border-[#FBBF24]/50 bg-[#2A2210] text-[#FBBF24]", label: t("dash.activity.reopened") }
+                                : { icon: ArrowRightLeft, cls: "border-[#22D3EE]/50 bg-[#0A1B2E] text-[#22D3EE]", label: t("dash.activity.routed") };
+                          const Icon = meta.icon;
+                          return (
+                            <li
+                              key={`${ev.at}-${ev.action}-${i}`}
+                              className="flex items-start gap-2.5"
+                            >
+                              <span
+                                className={cn(
+                                  "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                                  meta.cls
+                                )}
+                                aria-hidden="true"
+                              >
+                                <Icon className="h-2.5 w-2.5" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-baseline gap-x-2">
+                                  <span className={cn("text-xs font-semibold", meta.cls.split(" ").pop())}>{meta.label}</span>
+                                  <span className="text-[11px] text-muted-foreground">{ev.by.split(" (")[0]}</span>
+                                  <span className="tabular ml-auto text-[11px] text-muted-foreground">{fmtDate(ev.at)}</span>
+                                </div>
+                                {ev.note && (
+                                  <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/85">{ev.note}</p>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    )}
+                  </div>
+                );
+              })()}
+
               <DialogFooter className="flex-col gap-3 border-t border-white/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Info className="h-3.5 w-3.5" aria-hidden="true" />
-                  Demo data — simulated case
+                  {t("dash.demoCase")}
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
@@ -1674,7 +1787,7 @@ export default function DashboardView() {
                         title={reviewNoteText}
                       >
                         <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                        Signed off · {(signedOff[openId]?.by ?? detail?.reviewed_by ?? "").split(" (")[0]}
+                        {t("dash.signedOffBy")} · {(signedOff[openId]?.by ?? detail?.reviewed_by ?? "").split(" (")[0]}
                         {reviewedAtText ? ` · ${reviewedAtText}` : ""}
                       </span>
                       <Button

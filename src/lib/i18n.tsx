@@ -191,7 +191,58 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "screen.running": { en: "Running…", hi: "चल रहा है…" },
   "screen.report": { en: "Clinical report", hi: "नैदानिक रिपोर्ट" },
 
-  // ── capacity share link ─────────────────────────────────
+  // ── report modal (dashboard) internals ──────────────────────
+  "leg.vessels": { en: "Vessels", hi: "वाहिकाएं" },
+  "dash.cnnTop3": { en: "Class probabilities — top 3", hi: "क्लास प्रायिकताएं — शीर्ष 3" },
+  "dash.gradcamNote": {
+    en: "Grad-CAM highlights the regions that drove the CNN decision — the model attends to lesions, not artifacts.",
+    hi: "Grad-CAM उन क्षेत्रों को उजागर करता है जहाँ से CNN को निर्णय मिला — मॉडल घावों पर ध्यान देता है, छवि-दोषों पर नहीं।",
+  },
+  "dash.gateFailed": { en: "Image failed the quality gate", hi: "छवि गुणवत्ता गेट में विफल रही" },
+  "dash.dmeFlagged": { en: "DME risk flagged", hi: "DME जोखिम चिह्नित" },
+  "dash.demoCase": { en: "Demo data — simulated case", hi: "डेमो डेटा — नमूना केस" },
+
+  // ── per-case audit history (report modal) ────────────────
+  "dash.caseAudit.title": { en: "Case audit history", hi: "केस ऑडिट इतिहास" },
+  "dash.caseAudit.empty": {
+    en: "No decisions recorded yet — sign-offs and reopens will appear here",
+    hi: "अभी कोई निर्णय दर्ज नहीं — साइन-ऑफ़ और पुनः-खोलना यहाँ दिखेंगे",
+  },
+
+  // ── clinical report card (screening + shared labels) ─────────
+  "screen.aiGrade": { en: "AI grade", hi: "AI ग्रेड" },
+  "screen.confidence": { en: "Confidence", hi: "आत्मविश्वास" },
+  "screen.centroid": { en: "Centroid distance", hi: "सेंट्रॉइड दूरी" },
+  "screen.regionOverlap": { en: "Region overlap", hi: "क्षेत्र ओवरलैप" },
+  "ev.ma": { en: "Microaneurysms", hi: "माइक्रोएन्यूरिज्म" },
+  "ev.hem": { en: "Hemorrhages", hi: "रक्तस्राव" },
+  "ev.ex": { en: "Exudates", hi: "एक्सूडेट्स" },
+  "ev.vessel": { en: "Vessel density", hi: "वाहिका घनत्व" },
+  "screen.cnnProbs": { en: "CNN probabilities — ICDR 0–4", hi: "CNN प्रायिकताएं — ICDR 0–4" },
+  "screen.referralTimeline": { en: "Referral timeline", hi: "रेफरल समय-रेखा" },
+  "screen.rt.screened": { en: "Screened today", hi: "आज जांचा गया" },
+  "screen.rt.graded": { en: "Grade + trust assigned", hi: "ग्रेड + भरोसा निर्धारित" },
+  "screen.rt.conf": { en: "confidence", hi: "आत्मविश्वास" },
+  "screen.rt.trustDetail": { en: "Trust score {s} · {level} trust", hi: "भरोसा स्कोर {s} · {level} भरोसा" },
+  "screen.rt.policy": {
+    en: "ICDR referral policy — DRISHTI never auto-clears on low trust",
+    hi: "ICDR रेफरल नीति — DRISHTI कम भरोसे पर कभी स्वतः स्वीकृत नहीं करता",
+  },
+  "trustLevel.HIGH": { en: "HIGH", hi: "उच्च" },
+  "trustLevel.MODERATE": { en: "MODERATE", hi: "मध्यम" },
+  "trustLevel.LOW": { en: "LOW", hi: "निम्न" },
+  "screen.pipeline": { en: "Pipeline", hi: "पाइपलाइन" },
+  "screen.t.gate": { en: "Gate", hi: "गेट" },
+  "screen.t.evidence": { en: "Evidence", hi: "साक्ष्य" },
+  "screen.t.cnn": { en: "CNN", hi: "CNN" },
+  "screen.t.explain": { en: "Explain + Trust", hi: "व्याख्या + भरोसा" },
+  "screen.t.total": { en: "Total", hi: "कुल" },
+  "icdr.action.0": { en: "Routine re-screen in 12 months", hi: "12 महीने में नियमित दोबारा जांच" },
+  "icdr.action.1": { en: "Re-screen in 6-12 months", hi: "6-12 महीने में दोबारा जांच" },
+  "icdr.action.2": { en: "Refer within 3-6 months", hi: "3-6 महीने के भीतर रेफर करें" },
+  "icdr.action.3": { en: "Refer within 4 weeks", hi: "4 सप्ताह के भीतर रेफर करें" },
+  "icdr.action.4": { en: "Urgent referral — within 1 week", hi: "अत्यावश्यक रेफरल — 1 सप्ताह के भीतर" },
+
   "cap.share": { en: "Copy share link", hi: "शेयर लिंक कॉपी करें" },
   "cap.shareCopied": { en: "Share link copied — config travels in the URL", hi: "शेयर लिंक कॉपी हो गया — कॉन्फ़िग URL में है" },
   "cap.shareFailed": { en: "Could not copy — copy the URL from the address bar", hi: "कॉपी नहीं हुआ — एड्रेस बार से URL कॉपी करें" },

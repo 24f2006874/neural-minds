@@ -76,16 +76,16 @@ const LESION_CHIPS: Array<{ key: string; label: string; countKey: "ma_count" | "
 
 const EVIDENCE_TILES: Array<{
   key: string;
-  label: string;
+  i18nKey: string;
   countKey: "ma_count" | "hem_count" | "ex_count" | "vessel_density_pct";
   color: string;
   decimals: number;
   suffix: string;
 }> = [
-  { key: "ma", label: "Microaneurysms", countKey: "ma_count", color: "#F87171", decimals: 0, suffix: "" },
-  { key: "hem", label: "Hemorrhages", countKey: "hem_count", color: "#FB923C", decimals: 0, suffix: "" },
-  { key: "ex", label: "Exudates", countKey: "ex_count", color: "#FBBF24", decimals: 0, suffix: "" },
-  { key: "vessel", label: "Vessel density", countKey: "vessel_density_pct", color: "#22D3EE", decimals: 1, suffix: "%" },
+  { key: "ma", i18nKey: "ev.ma", countKey: "ma_count", color: "#F87171", decimals: 0, suffix: "" },
+  { key: "hem", i18nKey: "ev.hem", countKey: "hem_count", color: "#FB923C", decimals: 0, suffix: "" },
+  { key: "ex", i18nKey: "ev.ex", countKey: "ex_count", color: "#FBBF24", decimals: 0, suffix: "" },
+  { key: "vessel", i18nKey: "ev.vessel", countKey: "vessel_density_pct", color: "#22D3EE", decimals: 1, suffix: "%" },
 ];
 
 function formatBytes(n: number): string {
@@ -170,26 +170,30 @@ function ProbabilityBars({ res }: { res: ScreeningResult }) {
 }
 
 function ReferralTimeline({ res }: { res: ScreeningResult }) {
+  const { t } = useLang();
   const cls = ICDR_CLASSES[res.classification.class_level] ?? ICDR_CLASSES[0];
   const steps = [
     {
-      title: "Screened today",
+      title: t("screen.rt.screened"),
       detail: new Date(res.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
       tone: "#22D3EE",
     },
     {
-      title: "Grade + trust assigned",
-      detail: `${cls.short} · ${(res.classification.confidence * 100).toFixed(1)}% confidence`,
+      title: t("screen.rt.graded"),
+      detail: `${cls.short} · ${(res.classification.confidence * 100).toFixed(1)}% ${t("screen.rt.conf")}`,
       tone: cls.color,
     },
     {
       title: res.trust.route,
-      detail: `Trust score ${res.trust.trust_score.toFixed(2)} · ${res.trust.trust_level} trust`,
+      detail: t("screen.rt.trustDetail", {
+        s: res.trust.trust_score.toFixed(2),
+        level: t(`trustLevel.${res.trust.trust_level}`),
+      }),
       tone: trustColors[res.trust.trust_level],
     },
     {
-      title: cls.action,
-      detail: "ICDR referral policy — DRISHTI never auto-clears on low trust",
+      title: t(`icdr.action.${cls.level}`),
+      detail: t("screen.rt.policy"),
       tone: cls.color,
     },
   ];
@@ -882,12 +886,12 @@ export default function ScreeningView() {
                     )}
                   </div>
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">AI grade</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{t("screen.aiGrade")}</p>
                     <p className="mt-1 font-display text-2xl font-bold leading-tight" style={{ color: predCls.color }}>
                       {result.classification.predicted_class}
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Confidence{" "}
+                      {t("screen.confidence")}{" "}
                       <span className="tabular font-semibold text-foreground">
                         {(result.classification.confidence * 100).toFixed(1)}%
                       </span>
@@ -925,13 +929,13 @@ export default function ScreeningView() {
                     <p className="font-display text-2xl font-bold text-[#22D3EE]">
                       <AnimatedNumber value={result.explainability.centroid_distance_dd} decimals={2} suffix=" DD" />
                     </p>
-                    <p className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">Centroid distance</p>
+                    <p className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">{t("screen.centroid")}</p>
                   </div>
                   <div className="flex flex-col items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] p-3 text-center">
                     <p className="font-display text-2xl font-bold text-[#22D3EE]">
                       <AnimatedNumber value={result.explainability.region_overlap * 100} decimals={0} suffix="%" />
                     </p>
-                    <p className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">Region overlap</p>
+                    <p className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">{t("screen.regionOverlap")}</p>
                   </div>
                 </div>
 
@@ -940,7 +944,7 @@ export default function ScreeningView() {
                   {EVIDENCE_TILES.map((tile) => (
                     <div key={tile.key} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
                       <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: tile.color }}>
-                        {tile.label}
+                        {t(tile.i18nKey)}
                       </p>
                       <p className="mt-1 font-display text-2xl font-bold">
                         <AnimatedNumber value={result.evidence[tile.countKey]} decimals={tile.decimals} suffix={tile.suffix} />
@@ -952,26 +956,26 @@ export default function ScreeningView() {
                 {/* probability bars */}
                 <div className="mt-5 border-t border-white/10 pt-5">
                   <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    CNN probabilities — ICDR 0–4
+                    {t("screen.cnnProbs")}
                   </p>
                   <ProbabilityBars res={result} />
                 </div>
 
                 {/* referral timeline */}
                 <div className="mt-5 border-t border-white/10 pt-5">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Referral timeline</p>
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("screen.referralTimeline")}</p>
                   <ReferralTimeline res={result} />
                 </div>
 
                 {/* timings footer */}
                 <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/10 pt-4">
-                  <span className="mr-1 text-[11px] uppercase tracking-wider text-muted-foreground">Pipeline</span>
+                  <span className="mr-1 text-[11px] uppercase tracking-wider text-muted-foreground">{t("screen.pipeline")}</span>
                   {(
                     [
-                      ["Gate", result.timings_ms.gate],
-                      ["Evidence", result.timings_ms.evidence],
-                      ["CNN", result.timings_ms.classify],
-                      ["Explain + Trust", result.timings_ms.explain],
+                      [t("screen.t.gate"), result.timings_ms.gate],
+                      [t("screen.t.evidence"), result.timings_ms.evidence],
+                      [t("screen.t.cnn"), result.timings_ms.classify],
+                      [t("screen.t.explain"), result.timings_ms.explain],
                     ] as Array<[string, number]>
                   ).map(([label, ms]) => (
                     <span key={label} className="chip border-white/10 text-muted-foreground">
@@ -979,7 +983,7 @@ export default function ScreeningView() {
                     </span>
                   ))}
                   <span className="chip border-[#22D3EE]/40 text-[#22D3EE]">
-                    Total {(result.timings_ms.total / 1000).toFixed(1)}s
+                    {t("screen.t.total")} {(result.timings_ms.total / 1000).toFixed(1)}s
                   </span>
                 </div>
 
