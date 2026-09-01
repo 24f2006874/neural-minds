@@ -78,6 +78,62 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "dash.reopening": { en: "Reopening…", hi: "पुनः खोला जा रहा है…" },
   "dash.pdf": { en: "Download PDF", hi: "PDF डाउनलोड" },
 
+  // ── dialogs (reopen + bulk confirm) ──────────────────────
+  "dash.reopen.title": { en: "Reopen {id} for review?", hi: "{id} को पुनः समीक्षा के लिए खोलें?" },
+  "dash.reopen.body.a": { en: "The sign-off will be cleared and the case returns to the ", hi: "साइन-ऑफ़ हटा दिया जाएगा और केस वापस " },
+  "dash.reopen.queueUrgent": { en: "urgent", hi: "अत्यावश्यक" },
+  "dash.reopen.queueReview": { en: "review", hi: "समीक्षा" },
+  "dash.reopen.body.b": {
+    en: " queue. The audit trail records the reopen — re-approve when you're ready.",
+    hi: " पंक्ति में चला जाएगा। ऑडिट ट्रेल में पुनः-खोलना दर्ज होगा — जब तैयार हों दोबारा स्वीकृत करें।",
+  },
+  "dash.reopen.keep": { en: "Keep sign-off", hi: "साइन-ऑफ़ रखें" },
+  "dash.reopen.confirm": { en: "Reopen case", hi: "केस पुनः खोलें" },
+  "dash.bulk.titleOne": { en: "Sign off 1 case?", hi: "1 केस साइन-ऑफ़ करें?" },
+  "dash.bulk.titleMany": { en: "Sign off {n} cases?", hi: "{n} केस साइन-ऑफ़ करें?" },
+  "dash.bulk.body.a": { en: "Each selected case becomes ", hi: "हर चयनित केस " },
+  "dash.bulk.body.hl": { en: "auto-cleared with your sign-off", hi: "आपके साइन-ऑफ़ के साथ स्वतः स्वीकृत" },
+  "dash.bulk.body.b": { en: " recorded in the audit trail. Cases: ", hi: " बनेगा और ऑडिट ट्रेल में दर्ज होगा। केस: " },
+  "dash.bulk.body.c": {
+    en: ". Each sign-off can be undone later from its report.",
+    hi: "। हर साइन-ऑफ़ बाद में उसकी रिपोर्ट से पूर्ववत किया जा सकता है।",
+  },
+  "dash.bulk.cancel": { en: "Cancel", hi: "रद्द करें" },
+  "dash.bulk.confirm": { en: "Approve & sign off {n}", hi: "{n} स्वीकृत व साइन-ऑफ़" },
+  "dash.bulk.signing": { en: "Signing off…", hi: "साइन-ऑफ़ हो रहा है…" },
+  "dash.queueUrgent": { en: "urgent", hi: "अत्यावश्यक" },
+  "dash.queueReview": { en: "review", hi: "समीक्षा" },
+  "dash.showing": { en: "Showing {n} of {total} cases in this lane matching “{q}”", hi: "इस पंक्ति में “{q}” से मेल खाते {total} में से {n} केस" },
+  "dash.noMatch.hint": {
+    en: "IDs look like SEVERE-001 or RAMPUR-0118",
+    hi: "आईडी ऐसे दिखते हैं: SEVERE-001 या RAMPUR-0118",
+  },
+  "dash.noMatch": { en: "No cases match your search", hi: "खोज से कोई केस मेल नहीं खाता" },
+  "dash.retry": { en: "Retry", hi: "पुनः प्रयास" },
+  "dash.signedOffBy": { en: "Signed off", hi: "साइन-ऑफ़" },
+  "dash.signedChipTitle": { en: "Approved by the reviewing doctor", hi: "डॉक्टर द्वारा स्वीकृत" },
+  "dash.openLive": { en: "Open live screening", hi: "सजीव जांच खोलें" },
+  "dash.emptyQueue": { en: "No cases in this queue", hi: "इस पंक्ति में कोई केस नहीं" },
+  "dash.casesSelected": { en: "cases selected", hi: "केस चयनित" },
+  "dash.clear": { en: "clear", hi: "साफ़ करें" },
+  "dash.selectAll": { en: "Select all signable cases in this lane", hi: "इस पंक्ति के सभी साइन-ऑफ़ योग्य केस चुनें" },
+  "dash.sortBy": { en: "Sort by {col}", hi: "{col} के अनुसार क्रमित करें" },
+
+  "dash.toast.signed": { en: "Signed off by {by} — saved to the register", hi: "{by} द्वारा साइन-ऑफ़ — रजिस्टर में सुरक्षित" },
+  "dash.toast.signFail": { en: "Sign-off failed — try again", hi: "साइन-ऑफ़ विफल — फिर प्रयास करें" },
+  "dash.toast.reopened": { en: "Case reopened — returned to the {lane} queue", hi: "केस पुनः खोला गया — {lane} पंक्ति में वापस" },
+  "dash.toast.reopenFail": { en: "Reopen failed — try again", hi: "पुनः खोलना विफल — फिर प्रयास करें" },
+  "dash.toast.bulkSigned": { en: "{n} cases signed off — saved to the register", hi: "{n} केस साइन-ऑफ़ — रजिस्टर में सुरक्षित" },
+  "dash.toast.bulkSignedOne": { en: "1 case signed off — saved to the register", hi: "1 केस साइन-ऑफ़ — रजिस्टर में सुरक्षित" },
+  "dash.toast.bulkFail": { en: "{n} cases couldn't be signed — {first}", hi: "{n} केस साइन नहीं हो सके — {first}" },
+  "dash.toast.bulkFailOne": { en: "1 case couldn't be signed — {first}", hi: "1 केस साइन नहीं हो सका — {first}" },
+  "dash.toast.bulkFailApi": { en: "Bulk sign-off failed — try again", hi: "बल्क साइन-ऑफ़ विफल — फिर प्रयास करें" },
+  "dash.toast.noSigned": {
+    en: "No signed-off cases yet — approve a case first to build the register",
+    hi: "अभी कोई साइन-ऑफ़ केस नहीं — रजिस्टर बनाने के लिए पहले कोई केस स्वीकृत करें",
+  },
+  "dash.toast.registerPdf": { en: "Register PDF generated — {n} signed case{s}", hi: "रजिस्टर PDF बना — {n} साइन-ऑफ़ केस" },
+
   // ── screening ────────────────────────────────────────────────
   "screen.eyebrow": { en: "LIVE SCREENING", hi: "सजीव जांच" },
   "screen.title.a": { en: "Upload a retina. ", hi: "रेटिना अपलोड करें। " },
@@ -86,16 +142,44 @@ const DICT: Record<string, { en: string; hi: string }> = {
     en: "Quality gate → evidence → grading → Grad-CAM → trust routing — every stage animates exactly like the real console.",
     hi: "गुणवत्ता गेट → साक्ष्य → ग्रेडिंग → Grad-CAM → भरोसा रूटिंग — हर चरण असली कंसोल जैसा दिखता है।",
   },
+  "screen.trustScore": { en: "Trust score", hi: "भरोसा स्कोर" },
+  "screen.quality": { en: "Quality", hi: "गुणवत्ता" },
+  "screen.consistency": { en: "Consistency", hi: "संगति" },
+  "screen.sendReview": { en: "Send to review queue", hi: "समीक्षा पंक्ति में भेजें" },
+  "screen.toastQueued": { en: "Queued for ophthalmologist sign-off", hi: "नेत्र विशेषज्ञ साइन-ऑफ़ के लिए कतार में" },
+  "screen.pdf": { en: "Download report PDF", hi: "रिपोर्ट PDF डाउनलोड करें" },
+  "screen.new": { en: "New screening", hi: "नई जांच" },
+  "screen.registerStrip": { en: "From the register — tap to re-run", hi: "रजिस्टर से — दोबारा चलाने हेतु टैप करें" },
+  "screen.haltedBanner": {
+    en: "Quality gate halted the pipeline — no AI grade was produced.",
+    hi: "गुणवत्ता गेट ने पाइपलाइन रोक दी — कोई AI ग्रेड नहीं बना।",
+  },
+  "screen.haltedTitle": { en: "Quality gate halted the pipeline", hi: "गुणवत्ता गेट ने पाइपलाइन रोक दी" },
+  "screen.live": { en: "LIVE", hi: "सजीव" },
+  "screen.start": { en: "Start screening", hi: "जांच शुरू करें" },
+  "screen.running": { en: "Running…", hi: "चल रहा है…" },
+  "screen.report": { en: "Clinical report", hi: "नैदानिक रिपोर्ट" },
+
+  // ── capacity share link ─────────────────────────────────
+  "cap.share": { en: "Copy share link", hi: "शेयर लिंक कॉपी करें" },
+  "cap.shareCopied": { en: "Share link copied — config travels in the URL", hi: "शेयर लिंक कॉपी हो गया — कॉन्फ़िग URL में है" },
+  "cap.shareFailed": { en: "Could not copy — copy the URL from the address bar", hi: "कॉपी नहीं हुआ — एड्रेस बार से URL कॉपी करें" },
 };
 
 type Ctx = {
   lang: Lang;
   setLang: (l: Lang) => void;
-  /** translate by key */
-  t: (key: string) => string;
+  /** translate by key; {var} placeholders replaced from `vars` */
+  t: (key: string, vars?: Record<string, string | number>) => string;
 };
 
-const LangCtx = createContext<Ctx>({ lang: "en", setLang: () => {}, t: (k) => DICT[k]?.en ?? k });
+/** Replace {placeholders} in a translated string. */
+function interpolate(template: string, vars?: Record<string, string | number>): string {
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (m, name) => (name in vars ? String(vars[name]) : m));
+}
+
+const LangCtx = createContext<Ctx>({ lang: "en", setLang: () => {}, t: (k, v) => interpolate(DICT[k]?.en ?? k, v) });
 
 const STORAGE_KEY = "drishti-lang";
 const CHANGE_EVENT = "drishti-lang-change";
@@ -142,7 +226,13 @@ export function LangProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = lang === "hi" ? "hi" : "en";
   }, [lang]);
 
-  const t = useCallback((key: string) => DICT[key]?.[lang] ?? DICT[key]?.en ?? key, [lang]);
+  const t = useCallback(
+    (key: string, vars?: Record<string, string | number>) => {
+      const template = DICT[key]?.[lang] ?? DICT[key]?.en ?? key;
+      return interpolate(template, vars);
+    },
+    [lang]
+  );
 
   const value = useMemo(() => ({ lang, setLang, t }), [lang, setLang, t]);
   return <LangCtx.Provider value={value}>{children}</LangCtx.Provider>;

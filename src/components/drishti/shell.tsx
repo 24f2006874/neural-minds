@@ -48,7 +48,10 @@ export function NavProvider({ children }: { children: (view: ViewKey) => ReactNo
 
   useEffect(() => {
     const apply = () => {
-      const h = window.location.hash.replace(/^#\/?/, "") as ViewKey;
+      // Hash carries an optional query (e.g. "#/capacity?c=3-2-25&cmp=1") —
+      // the view key is everything before "?".
+      const raw = window.location.hash.replace(/^#\/?/, "");
+      const h = raw.split("?")[0] as ViewKey;
       if (NAV_ITEMS.some((n) => n.key === h)) setView(h);
       else setView("home");
     };

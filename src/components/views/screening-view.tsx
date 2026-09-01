@@ -565,12 +565,12 @@ export default function ScreeningView() {
                 {phase === "running" ? (
                   <>
                     <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                    Running…
+                    {t("screen.running")}
                   </>
                 ) : (
                   <>
                     <ScanEye className="h-5 w-5" aria-hidden />
-                    Start screening
+                    {t("screen.start")}
                   </>
                 )}
               </Button>
@@ -585,7 +585,7 @@ export default function ScreeningView() {
               <div className="space-y-1.5 border-t border-white/8 pt-4">
                 <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
-                  From the register — tap to re-run
+                  {t("screen.registerStrip")}
                 </span>
                 {!recent ? (
                   <div className="space-y-1.5 pt-1">
@@ -688,7 +688,7 @@ export default function ScreeningView() {
                         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#22D3EE] opacity-75" />
                         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#22D3EE]" />
                       </span>
-                      LIVE
+                      {t("screen.live")}
                     </span>
                     <span className="font-display text-sm font-bold tracking-wide">{result.patient_id}</span>
                   </div>
@@ -770,7 +770,7 @@ export default function ScreeningView() {
                         transition={{ duration: 0.35, ease: "easeOut" }}
                         className="glass-strong absolute bottom-3 left-3 rounded-xl p-1.5"
                       >
-                        <ScoreDial value={result.gate.quality_score} size={110} tone="auto" sublabel="quality" />
+                        <ScoreDial value={result.gate.quality_score} size={110} tone="auto" sublabel={t("screen.quality")} />
                       </motion.div>
                     )}
                     {/* rejection stamp (photograph path — RetinaView stamps itself) */}
@@ -789,7 +789,7 @@ export default function ScreeningView() {
                         className="mt-4 flex items-start gap-2.5 rounded-xl border border-[#F87171]/40 bg-[#F87171]/10 p-3.5 text-sm leading-relaxed text-[#F87171]"
                       >
                         <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                        <span>Quality gate halted the pipeline — no AI grade was produced.</span>
+                        <span>{t("screen.haltedBanner")}</span>
                       </motion.div>
                     )}
                   </div>
@@ -825,7 +825,7 @@ export default function ScreeningView() {
                     transition={{ duration: 0.4, ease: "easeOut" }}
                     className="mt-6 flex flex-col items-center gap-4 border-t border-white/10 pt-5 sm:flex-row sm:justify-center sm:gap-10"
                   >
-                    <ScoreDial value={result.trust.trust_score} size={140} label="Trust score" sublabel={result.trust.trust_level} />
+                    <ScoreDial value={result.trust.trust_score} size={140} label={t("screen.trustScore")} sublabel={result.trust.trust_level} />
                     <div className="text-center sm:text-left">
                       <TrustChip level={result.trust.trust_level} />
                       <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">{result.trust.route}</p>
@@ -844,7 +844,7 @@ export default function ScreeningView() {
                 transition={{ duration: 0.4, ease: "easeOut" }}
                 role="article"
                 aria-label={`Clinical report for ${result.patient_id}`}
-                className="glass-strong rounded-2xl p-5 shadow-[0_0_60px_rgba(34,211,238,0.1)] sm:p-6"
+                className="card-accent-top glass-strong rounded-2xl p-5 shadow-[0_0_60px_rgba(34,211,238,0.1)] sm:p-6"
               >
                 {/* header */}
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
@@ -898,7 +898,7 @@ export default function ScreeningView() {
                     <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{result.trust.route}</p>
                   </div>
                   <div className="justify-self-center md:justify-self-end">
-                    <ScoreDial value={result.trust.trust_score} size={110} label="Trust score" />
+                    <ScoreDial value={result.trust.trust_score} size={110} label={t("screen.trustScore")} />
                   </div>
                 </div>
 
@@ -916,10 +916,10 @@ export default function ScreeningView() {
                 {/* measurement tiles */}
                 <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
                   <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                    <ScoreDial value={result.gate.quality_score} size={90} label="Quality" />
+                    <ScoreDial value={result.gate.quality_score} size={90} label={t("screen.quality")} />
                   </div>
                   <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                    <ScoreDial value={result.explainability.consistency} size={90} label="Consistency" />
+                    <ScoreDial value={result.explainability.consistency} size={90} label={t("screen.consistency")} />
                   </div>
                   <div className="flex flex-col items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] p-3 text-center">
                     <p className="font-display text-2xl font-bold text-[#22D3EE]">
@@ -990,15 +990,15 @@ export default function ScreeningView() {
                     className="btn-glow-cyan h-11 flex-1 bg-[#22D3EE] font-display font-semibold text-[#04121c] hover:bg-[#22D3EE]/90"
                   >
                     <FileDown className="h-4 w-4" aria-hidden />
-                    Download report PDF
+                    {t("screen.pdf")}
                   </Button>
                   <Button
-                    onClick={() => toast.success("Queued for ophthalmologist sign-off")}
+                    onClick={() => toast.success(t("screen.toastQueued"))}
                     variant="outline"
                     className="h-11 flex-1 border-[#22D3EE]/40 font-display font-semibold text-[#22D3EE] hover:bg-[#22D3EE]/10"
                   >
                     <Send className="h-4 w-4" aria-hidden />
-                    Send to review queue
+                    {t("screen.sendReview")}
                   </Button>
                   <Button
                     onClick={resetAll}
@@ -1006,7 +1006,7 @@ export default function ScreeningView() {
                     className="h-11 border-white/15 font-display font-semibold hover:bg-white/5"
                   >
                     <RotateCcw className="h-4 w-4" aria-hidden />
-                    New screening
+                    {t("screen.new")}
                   </Button>
                 </div>
               </motion.div>
@@ -1024,14 +1024,14 @@ export default function ScreeningView() {
                       <TriangleAlert className="h-5 w-5 text-[#F87171]" />
                     </div>
                     <div>
-                      <p className="font-display text-lg font-bold text-[#F87171]">Quality gate halted the pipeline</p>
+                      <p className="font-display text-lg font-bold text-[#F87171]">{t("screen.haltedTitle")}</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">{result.gate.message}</p>
                     </div>
                   </div>
                   <StatusChip status="REJECTED" />
                 </div>
                 <div className="mt-5 grid items-center gap-5 rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
-                  <ScoreDial value={result.gate.quality_score} size={90} sublabel="quality" />
+                  <ScoreDial value={result.gate.quality_score} size={90} sublabel={t("screen.quality")} />
                   <div className="text-sm text-muted-foreground">
                     <p className="font-medium text-foreground">Recapture before any AI runs — the gate is the safety net.</p>
                     <ul className="mt-2 space-y-1 text-xs leading-relaxed">
@@ -1055,7 +1055,7 @@ export default function ScreeningView() {
                     className="h-11 border-white/15 font-display font-semibold hover:bg-white/5"
                   >
                     <RotateCcw className="h-4 w-4" aria-hidden />
-                    New screening
+                    {t("screen.new")}
                   </Button>
                 </div>
               </GlassCard>

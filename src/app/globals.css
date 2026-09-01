@@ -111,6 +111,18 @@
     font-family: var(--font-display);
     letter-spacing: -0.02em;
   }
+  /* cyan selection — brand detail on every text selection */
+  ::selection {
+    background: rgba(34, 211, 238, 0.32);
+    color: #e6f1ff;
+  }
+  /* keyboard focus ring: subtle cyan outline for every interactive element
+     (complements the component-level ring-2 utilities; same brand color) */
+  :where(a, button, input, select, textarea, summary, [role="button"], [tabindex]):focus-visible {
+    outline: 2px solid rgba(34, 211, 238, 0.55);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 /* ── Scene background: deep radial gradients, subtle grid ─────────── */
@@ -169,9 +181,28 @@
 /* ── Buttons with cyan glow ────────────────────────────────────────── */
 .btn-glow-cyan {
   box-shadow: 0 0 18px rgba(34, 211, 238, 0.35), inset 0 0 12px rgba(34, 211, 238, 0.12);
+  transition: box-shadow 0.25s ease-out, transform 0.15s ease-out, filter 0.25s ease-out;
 }
 .btn-glow-cyan:hover {
   box-shadow: 0 0 34px rgba(34, 211, 238, 0.55), inset 0 0 16px rgba(34, 211, 238, 0.2);
+}
+.btn-glow-cyan:active {
+  transform: scale(0.97);
+  filter: brightness(1.08);
+}
+
+/* ── Accent hairline: gradient top edge for hero cards ────────── */
+.card-accent-top {
+  position: relative;
+  overflow: hidden;
+}
+.card-accent-top::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 4%, rgba(34, 211, 238, 0.75) 30%, rgba(52, 211, 153, 0.55) 65%, transparent 96%);
+  pointer-events: none;
 }
 
 /* ── Scanning laser line (processing state) ────────────────────────── */
@@ -317,3 +348,5 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* r7 accent polish */

@@ -25,6 +25,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { motion } from "framer-motion";
 
 import { AnimatedNumber } from "@/components/drishti/animated-number";
 import { GlassCard, Reveal, SectionHeading, StatusChip, TrustChip } from "@/components/drishti/primitives";
@@ -176,6 +177,7 @@ function StatCard({
   valueClass,
   iconClass,
   loading,
+  index = 0,
 }: {
   icon: LucideIcon;
   label: string;
@@ -186,9 +188,16 @@ function StatCard({
   valueClass: string;
   iconClass: string;
   loading: boolean;
+  index?: number;
 }) {
   return (
-    <GlassCard className="p-4 sm:p-6">
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay: 0.06 * index, ease: "easeOut" }}
+      className="h-full"
+    >
+    <GlassCard className="glass-card-hover h-full p-4 hover:-translate-y-0.5 sm:p-6">
       {loading ? (
         <div className="flex items-start justify-between gap-3">
           <div className="w-full space-y-2.5">
@@ -213,6 +222,7 @@ function StatCard({
         </div>
       )}
     </GlassCard>
+    </motion.div>
   );
 }
 
@@ -602,7 +612,7 @@ export default function DashboardView() {
       }
       const data = (await res.json()) as { reviewed_by: string; reviewed_at: string };
       const at = data.reviewed_at ? new Date(data.reviewed_at).toLocaleString() : new Date().toLocaleString();
-      toast.success(`Signed off by ${data.reviewed_by} — saved to the register`);
+      toast.success(t("dash.toast.signed", { by: data.reviewed_by }));
       signedOffRef.current = { ...signedOffRef.current, [patientId]: true };
       // remember the pre-sign-off status so Undo can restore the right queue lane
       const prevRow = allRows?.find((r) => r.patient_id === patientId) ?? rows?.find((r) => r.patient_id === patientId);
@@ -628,7 +638,7 @@ export default function DashboardView() {
       quietRefreshRef.current = true;
       void loadAll(true);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Sign-off failed — try again");
+      toast.error(e instanceof Error ? e.message : t("dash.toast.signFail"));
     } finally {
       setSigningOff(null);
     }
@@ -657,7 +667,9 @@ export default function DashboardView() {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(err.error ?? `API returned ${res.status}`);
       }
-      toast.success(`Case reopened — returned to the ${previousStatus === "URGENT" ? "urgent" : "review"} queue`);
+      toast.success(
+        t("dash.toast.reopened", { lane: previousStatus === "URGENT" ? t("dash.queueUrgent") : t("dash.queueReview") })
+      );
       signedOffRef.current = Object.fromEntries(
         Object.entries(signedOffRef.current).filter(([k]) => k !== patientId)
       );
@@ -677,7 +689,7 @@ export default function DashboardView() {
       quietRefreshRef.current = true;
       void loadAll(true);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Reopen failed — try again");
+      toast.error(e instanceof Error ? e.message : t("dash.toast.reopenFail"));
     } finally {
       setSigningOff(null);
       setReopenTarget(null);
@@ -734,20 +746,24 @@ export default function DashboardView() {
         setAllRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
         setRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
         toast.success(
-          `${data.signed_count} case${data.signed_count === 1 ? "" : "s"} signed off — saved to the register`
+          data.signed_count === 1
+            ? t("dash.toast.bulkSignedOne")
+            : t("dash.toast.bulkSigned", { n: data.signed_count })
         );
       }
       if (data.failed.length > 0) {
         const first = data.failed[0];
         toast.error(
-          `${data.failed.length} case${data.failed.length === 1 ? "" : "s"} couldn't be signed — ${first.patient_id}: ${first.error}`
+          data.failed.length === 1
+            ? t("dash.toast.bulkFailOne", { first: `${first.patient_id}: ${first.error}` })
+            : t("dash.toast.bulkFail", { n: data.failed.length, first: `${first.patient_id}: ${first.error}` })
         );
       }
       setSelected(new Set());
       quietRefreshRef.current = true;
       void loadAll(true);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Bulk sign-off failed — try again");
+      toast.error(e instanceof Error ? e.message : t("dash.toast.bulkFailApi"));
     } finally {
       setBulkBusy(false);
       setBulkConfirmOpen(false);
@@ -757,11 +773,13 @@ export default function DashboardView() {
   function handleRegisterPdf() {
     const signedRows = (allRows ?? []).filter((r) => r.reviewed_by);
     if (signedRows.length === 0) {
-      toast.info("No signed-off cases yet — approve a case first to build the register");
+      toast.info(t("dash.toast.noSigned"));
       return;
     }
     downloadRegisterPdf(signedRows as RegisterRow[]);
-    toast.success(`Register PDF generated — ${signedRows.length} signed case${signedRows.length === 1 ? "" : "s"}`);
+    toast.success(
+      t("dash.toast.registerPdf", { n: signedRows.length, s: signedRows.length === 1 ? "" : "s" })
+    );
   }
 
   const detailResult = detail?.details ?? null;
@@ -827,6 +845,7 @@ export default function DashboardView() {
         ) : (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
             <StatCard
+              index={0}
               icon={ScanEye}
               label={t("dash.stats.screened")}
               sub={t("dash.stats.screenedSub")}
@@ -836,6 +855,7 @@ export default function DashboardView() {
               loading={allLoading}
             />
             <StatCard
+              index={1}
               icon={Crosshair}
               label={t("dash.stats.referable")}
               sub={t("dash.stats.referableSub")}
@@ -845,6 +865,7 @@ export default function DashboardView() {
               loading={allLoading}
             />
             <StatCard
+              index={2}
               icon={ClipboardList}
               label={t("dash.stats.queue")}
               sub={t("dash.stats.queueSub")}
@@ -858,6 +879,7 @@ export default function DashboardView() {
               loading={allLoading}
             />
             <StatCard
+              index={3}
               icon={ShieldCheck}
               label={t("dash.stats.signed")}
               sub={
@@ -871,6 +893,7 @@ export default function DashboardView() {
               loading={allLoading}
             />
             <StatCard
+              index={4}
               icon={Timer}
               label={t("dash.stats.avg")}
               sub={t("dash.stats.avgSub")}
@@ -1075,7 +1098,8 @@ export default function DashboardView() {
                               : undefined
                         }
                         className={cn(
-                          "cursor-pointer border-white/5 focus-visible:bg-white/[0.05] focus-visible:outline-none",
+                          "cursor-pointer border-white/5 transition-shadow focus-visible:bg-white/[0.05] focus-visible:outline-none",
+                          "hover:shadow-[inset_2px_0_0_0_rgba(34,211,238,0.65)]",
                           isSelected
                             ? "bg-[#34D399]/[0.06] hover:bg-[#34D399]/[0.09]"
                             : "hover:bg-white/[0.03]"
@@ -1380,7 +1404,7 @@ export default function DashboardView() {
                     <ScoreDial
                       value={detailResult.trust.trust_score}
                       size={128}
-                      label="Trust"
+                      label={t("screen.trustScore")}
                       sublabel={detailResult.trust.trust_level}
                     />
                     <div className="min-w-0 space-y-2">
@@ -1390,8 +1414,8 @@ export default function DashboardView() {
                   </div>
 
                   <div className="flex items-center justify-around rounded-xl border border-white/10 bg-white/[0.02] p-4">
-                    <ScoreDial value={detailResult.gate.quality_score} size={90} label="Quality" />
-                    <ScoreDial value={detailResult.explainability.consistency} size={90} label="Consistency" />
+                    <ScoreDial value={detailResult.gate.quality_score} size={90} label={t("screen.quality")} />
+                    <ScoreDial value={detailResult.explainability.consistency} size={90} label={t("screen.consistency")} />
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">
@@ -1509,18 +1533,22 @@ export default function DashboardView() {
       <AlertDialog open={reopenTarget !== null} onOpenChange={(o) => { if (!o) setReopenTarget(null); }}>
         <AlertDialogContent className="border-[#FBBF24]/30 bg-[#0B1526]/95 backdrop-blur-xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-display text-lg">Reopen {reopenTarget ?? "this case"} for review?</AlertDialogTitle>
+            <AlertDialogTitle className="font-display text-lg">
+              {t("dash.reopen.title", { id: reopenTarget ?? "" })}
+            </AlertDialogTitle>
             <AlertDialogDescription className="text-sm leading-relaxed text-muted-foreground">
-              The sign-off will be cleared and the case returns to the{" "}
+              {t("dash.reopen.body.a")}
               <span className="font-semibold text-[#FBBF24]">
-                {reopenTarget && signedOff[reopenTarget]?.previousStatus === "URGENT" ? "urgent" : "review"} queue
+                {reopenTarget && signedOff[reopenTarget]?.previousStatus === "URGENT"
+                  ? t("dash.reopen.queueUrgent")
+                  : t("dash.reopen.queueReview")}
               </span>
-              . The audit trail records the reopen — re-approve when you&apos;re ready.
+              {t("dash.reopen.body.b")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="min-h-11 border-white/15 bg-transparent hover:bg-white/5 hover:text-foreground">
-              Keep sign-off
+              {t("dash.reopen.keep")}
             </AlertDialogCancel>
             <AlertDialogAction
               className="min-h-11 bg-[#FBBF24] font-semibold text-[#2A2210] hover:bg-[#EAB308]"
@@ -1530,7 +1558,7 @@ export default function DashboardView() {
               }}
             >
               <Undo2 className="h-4 w-4" aria-hidden="true" />
-              Reopen case
+              {t("dash.reopen.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1540,17 +1568,17 @@ export default function DashboardView() {
         <AlertDialogContent className="border-[#34D399]/30 bg-[#0B1526]/95 backdrop-blur-xl">
           <AlertDialogHeader>
             <AlertDialogTitle className="font-display text-lg">
-              Sign off {selectedIds.length} case{selectedIds.length === 1 ? "" : "s"}?
+              {selectedIds.length === 1 ? t("dash.bulk.titleOne") : t("dash.bulk.titleMany", { n: selectedIds.length })}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-sm leading-relaxed text-muted-foreground">
-              Each selected case becomes{" "}
-              <span className="font-semibold text-[#34D399]">auto-cleared with your sign-off</span> recorded in the
-              audit trail. Cases:{" "}
+              {t("dash.bulk.body.a")}
+              <span className="font-semibold text-[#34D399]">{t("dash.bulk.body.hl")}</span>
+              {t("dash.bulk.body.b")}
               <span className="tabular text-foreground">
                 {selectedIds.slice(0, 4).join(", ")}
                 {selectedIds.length > 4 ? ` + ${selectedIds.length - 4} more` : ""}
               </span>
-              . Each sign-off can be undone later from its report.
+              {t("dash.bulk.body.c")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1558,7 +1586,7 @@ export default function DashboardView() {
               className="min-h-11 border-white/15 bg-transparent hover:bg-white/5 hover:text-foreground"
               disabled={bulkBusy}
             >
-              Cancel
+              {t("dash.bulk.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               className="min-h-11 bg-[#34D399] font-semibold text-[#05261B] hover:bg-[#2BC48B]"
@@ -1569,7 +1597,7 @@ export default function DashboardView() {
               }}
             >
               <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-              {bulkBusy ? "Signing off…" : `Approve & sign off ${selectedIds.length}`}
+              {bulkBusy ? t("dash.bulk.signing") : t("dash.bulk.confirm", { n: selectedIds.length })}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

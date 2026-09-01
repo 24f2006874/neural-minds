@@ -18,6 +18,7 @@ import {
   Camera,
   Gauge,
   Layers,
+  Link2,
   Scale,
   ShieldCheck,
   Sparkles,
@@ -25,6 +26,7 @@ import {
   Timer,
   TriangleAlert,
 } from "lucide-react";
+import { toast } from "sonner";
 import { AnimatedNumber } from "@/components/drishti/animated-number";
 import { DarkTip } from "@/components/drishti/chart-frame";
 import { GlassCard, Reveal, SectionHeading } from "@/components/drishti/primitives";
@@ -37,6 +39,7 @@ import {
   type CapacityOutput,
 } from "@/lib/drishti";
 import { cn } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 
 // ────────────────────────────────────────────────────────────
 // Capacity Planner — PAGE 6
@@ -71,6 +74,31 @@ interface CapacityApiPayload {
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
+}
+
+/**
+ * Parse the shareable config from the hash query — `#/capacity?c=3-2-25&cmp=1`.
+ * Values outside the knob ranges are ignored (falls back to defaults).
+ */
+function readCapacityHash(): { cams?: number; revw?: number; arr?: number; cmp?: boolean } {
+  if (typeof window === "undefined") return {};
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const q = raw.indexOf("?");
+  if (q === -1) return {};
+  const params = new URLSearchParams(raw.slice(q + 1));
+  const out: { cams?: number; revw?: number; arr?: number; cmp?: boolean } = {};
+  const c = params.get("c");
+  if (c) {
+    const parts = c.split("-").map(Number);
+    if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+      const [cams, revw, arr] = parts;
+      if (cams >= 1 && cams <= 10) out.cams = cams;
+      if (revw >= 1 && revw <= 6) out.revw = revw;
+      if (arr >= 10 && arr <= 60) out.arr = arr;
+    }
+  }
+  if (params.get("cmp") === "1") out.cmp = true;
+  return out;
 }
 
 /** Trust-color load scale: green ≤75 · amber 75–90 · red >90. */
@@ -197,14 +225,50 @@ const scalingTipContent = (
 // ────────────────────────────────────────────────────────────
 
 export default function CapacityView() {
-  // Knobs — defaults mirror the "District pilot" preset.
-  const [cams, setCams] = useState(3);
-  const [revw, setRevw] = useState(2);
-  const [arr, setArr] = useState(25);
+  const { t } = useLang();
+  // Knobs — defaults mirror the "District pilot" preset. The initializer reads
+  // the shareable URL config (`#/capacity?c=...`) — safe because this view only
+  // ever mounts client-side (SPA view switch), never during SSR/hydration.
+  const [cams, setCams] = useState(() => readCapacityHash().cams ?? 3);
+  const [revw, setRevw] = useState(() => readCapacityHash().revw ?? 2);
+  const [arr, setArr] = useState(() => readCapacityHash().arr ?? 25);
   const [dragging, setDragging] = useState(false);
   const [remote, setRemote] = useState<{ key: string; payload: CapacityApiPayload } | null>(null);
-  const [compare, setCompare] = useState(false);
+  const [compare, setCompare] = useState(() => readCapacityHash().cmp ?? false);
   const reduce = useReducedMotion() ?? false;
+
+  // Keep the hash in sync with the knobs (replaceState — no history spam,
+  // no hashchange loop) so the URL is always shareable.
+  useEffect(() => {
+    const hash = `#/capacity?c=${cams}-${revw}-${arr}${compare ? "&cmp=1" : ""}`;
+    if (typeof window !== "undefined" && window.location.hash !== hash) {
+      window.history.replaceState(null, "", hash);
+    }
+  }, [cams, revw, arr, compare]);
+
+  // Pasting a share link while ALREADY on this view changes only the hash —
+  // re-apply the config on hashchange (replaceState above never fires it,
+  // so there is no feedback loop).
+  useEffect(() => {
+    const onHash = () => {
+      const p = readCapacityHash();
+      if (p.cams !== undefined) setCams(p.cams);
+      if (p.revw !== undefined) setRevw(p.revw);
+      if (p.arr !== undefined) setArr(p.arr);
+      setCompare(!!p.cmp);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success(t("cap.shareCopied"));
+    } catch {
+      toast.error(t("cap.shareFailed"));
+    }
+  };
 
   // Instant local math — same computeCapacity the API route calls server-side.
   const local = useMemo(() => computeCapacity({ cams, revw, arr }), [cams, revw, arr]);
@@ -596,6 +660,15 @@ export default function CapacityView() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void copyShareLink()}
+                title={t("cap.share")}
+                className="flex min-h-9 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#22D3EE]/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("cap.share")}
+              </button>
               <button
                 type="button"
                 onClick={() => setCompare((c) => !c)}
