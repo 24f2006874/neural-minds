@@ -13,9 +13,24 @@ export const dynamic = "force-dynamic";
  *  - REJECTED case         → failed entry "REJECTED cases cannot be signed off"
  *  - already signed-off    → failed entry "already signed off by <name>"
  *  - otherwise             → signed: status → AUTO_CLEARED, audit trail recorded,
- *                            embedded details JSON kept in sync.
+ *                            embedded details JSON kept in sync (+ audit_log event).
  * All successful rows are written inside one Prisma transaction.
  */
+
+/** Append an event to the details-JSON audit_log (best-effort — never blocks the write). */
+function withAuditEvent(details: string | null, event: Record<string, unknown>): string | undefined {
+  try {
+    if (!details) return undefined;
+    const parsed = JSON.parse(details) as Record<string, unknown>;
+    const log = Array.isArray(parsed.audit_log) ? parsed.audit_log : [];
+    parsed.audit_log = [...log, event].slice(-20); // keep the last 20 events per case
+    parsed.status = "AUTO_CLEARED";
+    return JSON.stringify(parsed);
+  } catch {
+    return undefined; // keep original details if unparseable
+  }
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const rawIds: unknown = body?.patient_ids;
@@ -61,21 +76,18 @@ export async function POST(req: NextRequest) {
     await db.$transaction(
       signed.map((patientId) => {
         const row = byId.get(patientId);
-        let details = row?.details ?? null;
-        try {
-          if (details) {
-            const parsed = JSON.parse(details);
-            parsed.status = "AUTO_CLEARED";
-            details = JSON.stringify(parsed);
-          }
-        } catch {
-          // keep original details if unparseable
-        }
+        const details = withAuditEvent(row?.details ?? null, {
+          at: reviewedAtIso,
+          action: "SIGNED",
+          by: reviewedBy,
+          note: batchNote,
+          status: "AUTO_CLEARED",
+        });
         return db.screening.update({
           where: { patientId },
           data: {
             status: "AUTO_CLEARED",
-            details: details ?? undefined,
+            details,
             reviewedBy,
             reviewedAt: new Date(),
             reviewNote: batchNote,

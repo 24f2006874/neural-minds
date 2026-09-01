@@ -132,7 +132,7 @@ export default function PwaBridge() {
   // Status pills lift above the install card whenever it occupies the corner.
   const pillBottom = showInstallCard ? "bottom-[9.5rem] sm:bottom-[8.25rem]" : "bottom-4";
 
-  const pill = `pointer-events-none fixed ${pillBottom} left-4 z-[60] flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs backdrop-blur-sm transition-[opacity,transform,bottom] duration-500 ease-out motion-reduce:transition-none`;
+  const pill = `pointer-events-none fixed ${pillBottom} left-4 z-[60] flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs backdrop-blur-sm print:hidden transition-[opacity,transform,bottom] duration-500 ease-out motion-reduce:transition-none`;
 
   const statusPill =
     !online ? (
@@ -167,7 +167,7 @@ export default function PwaBridge() {
         <div
           role="status"
           aria-live="polite"
-          className="rise-in pointer-events-none fixed bottom-4 left-4 z-[60] flex items-center gap-2 rounded-full border border-[#34D399]/45 bg-[#0B1526]/95 px-3 py-1.5 text-xs text-[#34D399] backdrop-blur-sm"
+          className="rise-in pointer-events-none fixed bottom-4 left-4 z-[60] flex items-center gap-2 rounded-full border border-[#34D399]/45 bg-[#0B1526]/95 px-3 py-1.5 text-xs text-[#34D399] backdrop-blur-sm print:hidden"
         >
           <MonitorDown className="h-3.5 w-3.5" aria-hidden="true" />
           DRISHTI installed — works offline
@@ -178,7 +178,7 @@ export default function PwaBridge() {
         <div
           role="dialog"
           aria-label="Install DRISHTI app"
-          className="rise-in fixed bottom-4 left-4 z-[60] w-[calc(100vw-2rem)] max-w-[280px] rounded-xl border border-[#22D3EE]/30 bg-[#0B1526]/95 p-3.5 shadow-[0_10px_36px_rgba(0,0,0,0.5)] backdrop-blur-md"
+          className="rise-in fixed bottom-4 left-4 z-[60] w-[calc(100vw-2rem)] max-w-[280px] rounded-xl border border-[#22D3EE]/30 bg-[#0B1526]/95 p-3.5 shadow-[0_10px_36px_rgba(0,0,0,0.5)] backdrop-blur-md print:hidden"
         >
           <div className="flex items-start gap-2.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#22D3EE]/30 bg-[#22D3EE]/10 text-[#22D3EE]">

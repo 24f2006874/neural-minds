@@ -134,6 +134,37 @@ const DICT: Record<string, { en: string; hi: string }> = {
   },
   "dash.toast.registerPdf": { en: "Register PDF generated — {n} signed case{s}", hi: "रजिस्टर PDF बना — {n} साइन-ऑफ़ केस" },
 
+  // ── register activity timeline ──────────────────────────────
+  "dash.activity.title": { en: "Register activity", hi: "रजिस्टर गतिविधि" },
+  "dash.activity.sub": {
+    en: "Every sign-off, reopen and routing decision — newest first",
+    hi: "हर साइन-ऑफ़, पुनः-खोलना और रूटिंग निर्णय — नवीनतम पहले",
+  },
+  "dash.activity.refresh": { en: "Refresh activity", hi: "गतिविधि रिफ्रेश करें" },
+  "dash.activity.empty": {
+    en: "No decisions recorded yet — sign off a case to start the trail",
+    hi: "अभी कोई निर्णय दर्ज नहीं — ट्रेल शुरू करने के लिए कोई केस साइन-ऑफ़ करें",
+  },
+  "dash.activity.error": { en: "Couldn't load activity", hi: "गतिविधि लोड नहीं हुई" },
+  "dash.activity.signed": { en: "Signed off", hi: "साइन-ऑफ़" },
+  "dash.activity.reopened": { en: "Reopened", hi: "पुनः खोला" },
+  "dash.activity.routed": { en: "Routed", hi: "रूट हुआ" },
+  "dash.activity.showing": { en: "Latest {n} of {total} recorded decisions", hi: "दर्ज {total} निर्णयों में से नवीनतम {n}" },
+  "dash.activity.openCase": { en: "Open case report", hi: "केस रिपोर्ट खोलें" },
+
+  // ── bulk sign-off note ──────────────────────────────────────
+  "dash.bulk.noteLabel": { en: "Note for the audit trail (optional)", hi: "ऑडिट ट्रेल के लिए नोट (वैकल्पिक)" },
+  "dash.bulk.notePlaceholder": {
+    en: "e.g. Both eyes checked — refer to district hospital next month",
+    hi: "जैसे: दोनों आंखें जांची — अगले महीने जिला अस्पताल भेजें",
+  },
+
+  // ── print register ──────────────────────────────────────────
+  "dash.print": { en: "Print register", hi: "रजिस्टर प्रिंट करें" },
+  "dash.print.title": { en: "DRISHTI — Screening day register", hi: "DRISHTI — जांच दिवस रजिस्टर" },
+  "dash.print.generated": { en: "Generated {date}", hi: "निर्मित {date}" },
+  "dash.print.page": { en: "Page {n}", hi: "पृष्ठ {n}" },
+
   // ── screening ────────────────────────────────────────────────
   "screen.eyebrow": { en: "LIVE SCREENING", hi: "सजीव जांच" },
   "screen.title.a": { en: "Upload a retina. ", hi: "रेटिना अपलोड करें। " },

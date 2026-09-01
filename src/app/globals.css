@@ -350,3 +350,149 @@
 }
 
 /* r7 accent polish */
+
+/* ── Print: clean paper day-register (dashboard "Print register") ─────
+   The dashboard stays interactive on screen; printing (Ctrl+P or the
+   Print button) yields a plain black-on-white register table suitable
+   for a camp day-book. `.print-only` blocks appear only on paper. */
+.print-only {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  /* paper, not glass */
+  html,
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+  .drishti-scene,
+  .drishti-grid-overlay {
+    background: none !important;
+    background-image: none !important;
+  }
+
+  /* app chrome: nav, footer, pills, toasts, scrollbars */
+  header,
+  footer {
+    display: none !important;
+  }
+  [data-sonner-toaster] {
+    display: none !important;
+  }
+
+  /* the register section spans the full paper width */
+  #dashboard-root {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* framer-motion's whileInView leaves below-the-fold blocks at opacity:0 —
+     paper must show everything regardless of scroll position */
+  #dashboard-root > div,
+  #dashboard-root > div * {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  /* glass cards become plain bordered boxes */
+  .glass-card {
+    background: #ffffff !important;
+    border: 1px solid #9ca3af !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+    border-radius: 4px;
+  }
+
+  /* register table: full width, no inner scroll, no sticky header */
+  #dashboard-root .max-h-\[480px\] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  #dashboard-root table {
+    min-width: 0 !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: fixed !important;
+  }
+  /* paper column plan: ID 14 · Date 12 · Grade 27 · Conf 9 · Trust 11 · Status 15 · DME 7 · Time 5 (%)
+     (nth-child indices include the print-hidden checkbox column) */
+  #dashboard-root th:nth-child(2), #dashboard-root td:nth-child(2) { width: 14%; }
+  #dashboard-root th:nth-child(3), #dashboard-root td:nth-child(3) { width: 12%; }
+  #dashboard-root th:nth-child(4), #dashboard-root td:nth-child(4) { width: 27%; }
+  #dashboard-root th:nth-child(5), #dashboard-root td:nth-child(5) { width: 9%; }
+  #dashboard-root th:nth-child(6), #dashboard-root td:nth-child(6) { width: 11%; }
+  #dashboard-root th:nth-child(7), #dashboard-root td:nth-child(7) { width: 15%; }
+  #dashboard-root th:nth-child(8), #dashboard-root td:nth-child(8) { width: 7%; }
+  #dashboard-root th:nth-child(9), #dashboard-root td:nth-child(9) { width: 5%; }
+  #dashboard-root thead {
+    display: table-header-group;
+  }
+  #dashboard-root thead th {
+    position: static !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    color: #111827 !important;
+    border-bottom: 2px solid #111827 !important;
+    padding: 6px 8px !important;
+    text-align: left !important;
+    font-size: 10px !important;
+    letter-spacing: 0.06em !important;
+  }
+  #dashboard-root thead th button {
+    color: #111827 !important;
+  }
+  #dashboard-root thead th button svg {
+    display: none !important;
+  }
+  #dashboard-root tbody tr {
+    break-inside: avoid;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+  #dashboard-root tbody tr:nth-child(even) {
+    background: #f3f4f6 !important;
+  }
+  #dashboard-root tbody td {
+    padding: 5px 8px !important;
+    font-size: 11px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+  }
+  /* monochrome text inside the table (paper register) */
+  #dashboard-root td *,
+  #dashboard-root th * {
+    color: #111827 !important;
+  }
+  #dashboard-root td .chip {
+    border: 1px solid #6b7280 !important;
+    background: #ffffff !important;
+    font-size: 9px !important;
+    padding: 1px 6px !important;
+  }
+  #dashboard-root td svg {
+    display: none !important;
+  }
+  /* icon-only "signed" badges become dark blobs without their svg — hide them
+     (the Register PDF carries the signer name for digital records) */
+  #dashboard-root td span[aria-label^="Signed off by"],
+  #dashboard-root td span[title^="Signed off by"] {
+    display: none !important;
+  }
+
+  /* page footer hint on paper */
+  #dashboard-root .print-only {
+    display: block !important;
+  }
+}
+
+/* r8 print register styles */
+/* r8b */
+/* r8c */
+/* r8d */
+/* r8e */

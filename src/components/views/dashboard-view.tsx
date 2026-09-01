@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
+  ArrowRightLeft,
   ArrowUp,
   ChevronsUpDown,
   ClipboardList,
@@ -10,8 +11,10 @@ import {
   Download,
   FileDown,
   FileText,
+  History,
   Info,
   ListChecks,
+  Printer,
   RefreshCw,
   ScanEye,
   ScanLine,
@@ -54,6 +57,7 @@ import {
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ICDR_CLASSES, type CaseStatus, type ScreeningResult, type TrustLevel } from "@/lib/drishti";
 import { useLang } from "@/lib/i18n";
 import { downloadRegisterPdf, downloadReportPdf, type RegisterRow } from "@/lib/report-pdf";
@@ -86,6 +90,18 @@ interface PatientDetail {
   details: ScreeningResult | null;
   reviewed_by?: string | null;
   reviewed_at?: string | null;
+}
+
+/** One entry of the register audit trail (GET /api/patients/audit). */
+interface AuditEvent {
+  patient_id: string;
+  action: "SIGNED" | "REOPENED" | "ROUTED";
+  by: string;
+  note: string;
+  at: string;
+  status: string;
+  trust_level: TrustLevel | string;
+  grade: string;
 }
 
 type FilterKey = "all" | "auto_cleared" | "needs_review" | "urgent" | "rejected";
@@ -394,6 +410,13 @@ export default function DashboardView() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkNote, setBulkNote] = useState("");
+
+  // register audit trail (activity timeline under the queue)
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditError, setAuditError] = useState<string | null>(null);
 
   const applyOverrides = useCallback(
     (list: PatientRow[]): PatientRow[] =>
@@ -423,6 +446,26 @@ export default function DashboardView() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  const loadAudit = useCallback(async (silent = false) => {
+    if (!silent) setAuditLoading(true);
+    setAuditError(null);
+    try {
+      const res = await fetch("/api/patients/audit?limit=40");
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      const data = (await res.json()) as { count: number; events: AuditEvent[] };
+      setAuditEvents(data.events ?? []);
+      setAuditTotal(data.count ?? 0);
+    } catch (e) {
+      setAuditError(e instanceof Error ? e.message : "Failed to load activity");
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAudit();
+  }, [loadAudit]);
 
   // queue rows follow the active filter; "all" reuses the already-loaded list
   useEffect(() => {
@@ -631,12 +674,13 @@ export default function DashboardView() {
       setRows((prev) => (prev ? applyOverrides(prev.map(flip)) : prev));
       setDetail((prev) =>
         prev && prev.details
-          ? { ...prev, status: "AUTO_CLEARED", details: { ...prev.details, status: "AUTO_CLEARED" } }
+          ? { ...prev, status: "AUTO_CLEARED", reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, details: { ...prev.details, status: "AUTO_CLEARED" } }
           : prev
       );
       // quiet refresh of stats + counts (list already flipped optimistically)
       quietRefreshRef.current = true;
       void loadAll(true);
+      void loadAudit(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("dash.toast.signFail"));
     } finally {
@@ -682,12 +726,13 @@ export default function DashboardView() {
       setRows((prev) => (prev ? prev.map(flip) : prev));
       setDetail((prev) =>
         prev && prev.details
-          ? { ...prev, status: previousStatus, details: { ...prev.details, status: previousStatus } }
+          ? { ...prev, status: previousStatus, reviewed_by: null, reviewed_at: null, details: { ...prev.details, status: previousStatus } }
           : prev
       );
       // quiet refresh of stats + counts (list already flipped optimistically)
       quietRefreshRef.current = true;
       void loadAll(true);
+      void loadAudit(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("dash.toast.reopenFail"));
     } finally {
@@ -704,7 +749,11 @@ export default function DashboardView() {
       const res = await fetch("/api/patients/bulk-signoff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patient_ids: ids, reviewed_by: "Dr. Review (dashboard demo)" }),
+        body: JSON.stringify({
+          patient_ids: ids,
+          reviewed_by: "Dr. Review (dashboard demo)",
+          ...(bulkNote.trim() ? { note: bulkNote.trim().slice(0, 400) } : {}),
+        }),
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
@@ -760,8 +809,10 @@ export default function DashboardView() {
         );
       }
       setSelected(new Set());
+      setBulkNote("");
       quietRefreshRef.current = true;
       void loadAll(true);
+      void loadAudit(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("dash.toast.bulkFailApi"));
     } finally {
@@ -801,8 +852,14 @@ export default function DashboardView() {
     : "Audit trail: signed off — persisted in the screening register";
 
   return (
-    <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+    <section id="dashboard-root" className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+      {/* print-only header — the paper day-register banner */}
+      <div className="print-only mb-4 border-b-2 border-black pb-3 text-black">
+        <p className="text-xl font-bold">{t("dash.print.title")}</p>
+        <p className="text-sm">{t("dash.print.generated", { date: new Date().toLocaleString() })}</p>
+      </div>
       <SectionHeading
+        className="print:hidden"
         eyebrow={t("dash.eyebrow")}
         title={
           <>
@@ -812,7 +869,7 @@ export default function DashboardView() {
         }
         sub={t("dash.sub")}
       />
-      <Reveal className="-mt-4 mb-10 flex justify-center">
+      <Reveal className="-mt-4 mb-10 flex justify-center print:hidden">
         <span className="chip border-[#FBBF24]/40 bg-[#2A2210]/60 text-[#FBBF24]">
           <TriangleAlert className="h-3 w-3" aria-hidden="true" />
           {t("dash.demoChip")}
@@ -820,7 +877,7 @@ export default function DashboardView() {
       </Reveal>
 
       {/* 1 ── Stats cards */}
-      <Reveal delay={0.05}>
+      <Reveal delay={0.05} className="print:hidden">
         {allError ? (
           <GlassCard className="border-[#F87171]/30 p-4 sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -909,7 +966,7 @@ export default function DashboardView() {
       </Reveal>
 
       {/* 2 ── Filter tabs + search + register export */}
-      <Reveal delay={0.1} className="mt-8">
+      <Reveal delay={0.1} className="mt-8 print:hidden">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
           {FILTER_TABS.map((tab) => {
@@ -1001,6 +1058,15 @@ export default function DashboardView() {
               <FileText className="h-4 w-4" aria-hidden="true" />
               {t("dash.registerPdf")}
             </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:border-[#22D3EE]/40 hover:text-[#22D3EE] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title="Print the current register — your browser's print dialog can save it as a PDF"
+            >
+              <Printer className="h-4 w-4" aria-hidden="true" />
+              {t("dash.print")}
+            </button>
             <a
               href={
                 selectedIds.length > 0
@@ -1035,8 +1101,8 @@ export default function DashboardView() {
         )}
       </Reveal>
 
-      {/* 3 ── Patient table (desktop) */}
-      <Reveal delay={0.15} className="mt-4 hidden md:block">
+      {/* 3 ── Patient table (desktop) — print:block keeps the register visible on paper below the md breakpoint */}
+      <Reveal delay={0.15} className="mt-4 hidden md:block print:block">
         <GlassCard className="p-0">
           {rowsError ? (
             <QueueError message={rowsError} onRetry={() => void loadAll()} />
@@ -1053,7 +1119,7 @@ export default function DashboardView() {
               <Table className="min-w-[760px]">
                 <TableHeader className="sticky top-0 z-10 bg-[#0A1628]/95 backdrop-blur">
                   <TableRow className="border-white/10 hover:bg-transparent">
-                    <TableHead className="w-10 pr-2">
+                    <TableHead className="w-10 pr-2 print:hidden">
                       <Checkbox
                         checked={allVisibleSelected ? true : selectedIds.length > 0 ? "indeterminate" : false}
                         onCheckedChange={toggleSelectAllVisible}
@@ -1069,7 +1135,7 @@ export default function DashboardView() {
                     <SortHead label="Conf" colKey="confidence" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
                     <SortHead label="Trust" colKey="trust_score" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
                     <SortHead label="Status" colKey="status" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-xs" />
-                    <TableHead className="hidden text-xs uppercase tracking-wider lg:table-cell">DME</TableHead>
+                    <TableHead className="hidden text-xs uppercase tracking-wider print:table-cell lg:table-cell">DME</TableHead>
                     <SortHead label="Time" colKey="processing_ms" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-right text-xs" />
                   </TableRow>
                 </TableHeader>
@@ -1105,7 +1171,7 @@ export default function DashboardView() {
                             : "hover:bg-white/[0.03]"
                         )}
                       >
-                        <TableCell className="w-10 py-3 pr-2" onClick={(e) => e.stopPropagation()}>
+                        <TableCell className="w-10 py-3 pr-2 print:hidden" onClick={(e) => e.stopPropagation()}>
                           {selectable ? (
                             <Checkbox
                               checked={isSelected}
@@ -1149,7 +1215,7 @@ export default function DashboardView() {
                             )}
                           </span>
                         </TableCell>
-                        <TableCell className="hidden py-3 lg:table-cell">
+                        <TableCell className="hidden py-3 print:table-cell lg:table-cell">
                           {r.dme_risk ? (
                             <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#F87171]">
                               <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1173,7 +1239,7 @@ export default function DashboardView() {
       </Reveal>
 
       {/* 3b ── Mobile cards */}
-      <div className="mt-4 grid gap-3 md:hidden">
+      <div className="mt-4 grid gap-3 print:hidden md:hidden">
         {rowsError ? (
           <GlassCard className="p-0">
             <QueueError message={rowsError} onRetry={() => void loadAll()} />
@@ -1268,7 +1334,7 @@ export default function DashboardView() {
       {/* 3c ── Bulk selection action bar */}
       {selectedIds.length > 0 && (
         <div
-          className="pointer-events-none fixed inset-x-0 bottom-28 z-40 flex justify-center px-4 sm:bottom-8"
+          className="pointer-events-none fixed inset-x-0 bottom-28 z-40 flex justify-center px-4 print:hidden sm:bottom-8"
           role="region"
           aria-label="Bulk sign-off actions"
         >
@@ -1307,6 +1373,116 @@ export default function DashboardView() {
           </div>
         </div>
       )}
+
+      {/* 3d ── Register activity timeline (audit trail) */}
+      <Reveal delay={0.2} className="mt-8 print:hidden">
+        <GlassCard className="p-4 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#22D3EE]/30 bg-[#22D3EE]/10 text-[#22D3EE]">
+                <History className="h-4.5 w-4.5" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="font-display text-base font-semibold text-foreground">{t("dash.activity.title")}</p>
+                <p className="text-xs text-muted-foreground">{t("dash.activity.sub")}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadAudit()}
+              disabled={auditLoading}
+              aria-label={t("dash.activity.refresh")}
+              title={t("dash.activity.refresh")}
+              className="flex min-h-10 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-[#22D3EE]/40 hover:text-[#22D3EE] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", auditLoading && "animate-spin")} aria-hidden="true" />
+              {t("dash.activity.refresh")}
+            </button>
+          </div>
+
+          <div className="drishti-scroll mt-4 max-h-96 overflow-y-auto pr-1">
+            {auditError ? (
+              <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+                <TriangleAlert className="h-5 w-5 text-[#F87171]" aria-hidden="true" />
+                <p className="text-sm text-muted-foreground">{t("dash.activity.error")}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="min-h-10 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
+                  onClick={() => void loadAudit()}
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  {t("dash.retry")}
+                </Button>
+              </div>
+            ) : auditLoading && !auditEvents ? (
+              <div className="ml-3 space-y-3 border-l border-white/10 py-1 pl-6">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="skeleton-shimmer h-12 w-full rounded-lg" />
+                ))}
+              </div>
+            ) : !auditEvents || auditEvents.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+                <History className="h-6 w-6 text-[#22D3EE]/50" aria-hidden="true" />
+                <p className="text-sm text-muted-foreground">{t("dash.activity.empty")}</p>
+              </div>
+            ) : (
+              <ol className="relative ml-3 space-y-1 border-l border-white/10 pl-6" aria-label={t("dash.activity.title")}>
+                {auditEvents.map((ev, i) => {
+                  const meta =
+                    ev.action === "SIGNED"
+                      ? { icon: ShieldCheck, cls: "border-[#34D399]/50 bg-[#0A2E24] text-[#34D399]", label: t("dash.activity.signed") }
+                      : ev.action === "REOPENED"
+                        ? { icon: Undo2, cls: "border-[#FBBF24]/50 bg-[#2A2210] text-[#FBBF24]", label: t("dash.activity.reopened") }
+                        : { icon: ArrowRightLeft, cls: "border-[#22D3EE]/50 bg-[#0A1B2E] text-[#22D3EE]", label: t("dash.activity.routed") };
+                  const Icon = meta.icon;
+                  return (
+                    <li
+                      key={`${ev.patient_id}-${ev.at}-${i}`}
+                      className="group relative rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.03]"
+                    >
+                      <span
+                        className={cn(
+                          "absolute -left-[33px] top-3 flex h-5.5 w-5.5 items-center justify-center rounded-full border",
+                          meta.cls
+                        )}
+                        aria-hidden="true"
+                      >
+                        <Icon className="h-3 w-3" />
+                      </span>
+                      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                        <button
+                          type="button"
+                          onClick={() => openReport(ev.patient_id)}
+                          title={t("dash.activity.openCase")}
+                          className="font-display text-sm font-semibold text-foreground underline-offset-4 hover:text-[#22D3EE] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {ev.patient_id}
+                        </button>
+                        <span className={cn("text-xs font-semibold", meta.cls.split(" ").pop())}>{meta.label}</span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {ev.by.split(" (")[0]}
+                        </span>
+                        <span className="tabular ml-auto text-[11px] text-muted-foreground">{fmtDate(ev.at)}</span>
+                      </div>
+                      {ev.note && (
+                        <p className="mt-1 text-xs leading-snug text-muted-foreground/85" title={ev.note}>
+                          {ev.note}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </div>
+          {!auditError && auditEvents && auditEvents.length > 0 && auditTotal > auditEvents.length && (
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              {t("dash.activity.showing", { n: auditEvents.length, total: auditTotal })}
+            </p>
+          )}
+        </GlassCard>
+      </Reveal>
 
       {/* 4 ── Report modal */}
       <Dialog open={openId !== null} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
@@ -1581,6 +1757,21 @@ export default function DashboardView() {
               {t("dash.bulk.body.c")}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="space-y-1.5">
+            <label htmlFor="bulk-note" className="text-xs font-medium text-foreground">
+              {t("dash.bulk.noteLabel")}
+            </label>
+            <Textarea
+              id="bulk-note"
+              value={bulkNote}
+              onChange={(e) => setBulkNote(e.target.value)}
+              placeholder={t("dash.bulk.notePlaceholder")}
+              rows={2}
+              maxLength={400}
+              disabled={bulkBusy}
+              className="resize-none border-white/15 bg-white/[0.03] text-sm placeholder:text-muted-foreground/60 focus-visible:border-[#22D3EE]/50 focus-visible:ring-[#22D3EE]/25"
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel
               className="min-h-11 border-white/15 bg-transparent hover:bg-white/5 hover:text-foreground"

@@ -6,6 +6,19 @@ export const dynamic = "force-dynamic";
 
 const ALLOWED = new Set(["AUTO_CLEARED", "NEEDS_REVIEW", "URGENT", "REJECTED"]);
 
+/** Append an event to the details-JSON audit_log (best-effort — never blocks the write). */
+function withAuditEvent(details: string, status: string, event: Record<string, unknown>): string {
+  try {
+    const parsed = JSON.parse(details) as Record<string, unknown>;
+    const log = Array.isArray(parsed.audit_log) ? parsed.audit_log : [];
+    parsed.audit_log = [...log, event].slice(-20); // keep the last 20 events per case
+    parsed.status = status;
+    return JSON.stringify(parsed);
+  } catch {
+    return details; // keep original details if unparseable
+  }
+}
+
 /**
  * PATCH /api/patients/{id}/status — doctor sign-off / routing override.
  * Body: { status, reviewed_by, note? }
@@ -35,15 +48,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "REJECTED cases cannot be signed off" }, { status: 409 });
   }
 
-  // Sync the embedded ScreeningResult so exports / report PDFs stay consistent
-  let details = row.details;
-  try {
-    const parsed = JSON.parse(row.details);
-    parsed.status = status;
-    details = JSON.stringify(parsed);
-  } catch {
-    // keep original details if unparseable
-  }
+  // Sync the embedded ScreeningResult so exports / report PDFs stay consistent,
+  // and append a structured audit_log event (SIGNED / REOPENED / ROUTED).
+  const wasSigned = Boolean(row.reviewedBy);
+  const action = status === "AUTO_CLEARED" ? "SIGNED" : wasSigned ? "REOPENED" : "ROUTED";
+  const eventNote =
+    note ??
+    (action === "SIGNED"
+      ? `Signed off by ${reviewedBy}`
+      : action === "REOPENED"
+        ? `Sign-off reopened by ${reviewedBy} — case returned to the ${status === "URGENT" ? "urgent" : "review"} queue`
+        : `Case routed to ${status} by ${reviewedBy}`);
+  const details = withAuditEvent(row.details, status, {
+    at: new Date().toISOString(),
+    action,
+    by: reviewedBy,
+    note: eventNote,
+    status,
+  });
 
   const updated = await db.screening.update({
     where: { patientId },
@@ -52,7 +74,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       details,
       reviewedBy: status === "AUTO_CLEARED" ? reviewedBy : null,
       reviewedAt: status === "AUTO_CLEARED" ? new Date() : null,
-      reviewNote: note,
+      reviewNote: action === "SIGNED" && !note ? `Signed off by ${reviewedBy}` : note,
     },
   });
 
