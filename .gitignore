@@ -1,74 +1,23 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-
-# typescript
+node_modules/
+.next/
+out/
+build/
+coverage/
+*.log
 *.tsbuildinfo
 next-env.d.ts
-local-*
-.claude
-.z-ai-config
-*.log
-dev.log
-dev.out.log
-test
-prompt
-
-server.log
-# Skills directory
-/skills/
-
-# Local runtime data: may contain uploaded clinical images or patient records.
-/backend/uploads/
-/backend/reports/
-/backend/patients.db
-/prisma/*.db
-
-# Generated Python and screening artifacts.
+.env
+.env.*
+!.env.example
+*.pem
 **/__pycache__/
 *.py[cod]
-/DRISHTI_portable/results/*_report.png
-/DRISHTI_portable/results/*_pipeline.png
-/DRISHTI_portable/results/*_evidence.png
-/tool-results/
-/.zscripts/dev.pid
-
-# Large model/release binaries. Host these with Git LFS or a release asset,
-# and document a download link instead of committing them to normal Git.
-
+*.db
+backend/uploads/
+backend/reports/
+DRISHTI_portable/results/*_report.png
+DRISHTI_portable/results/*_pipeline.png
+DRISHTI_portable/results/*_evidence.png
+.zscripts/dev.pid
+tool-results/
 *.zip
