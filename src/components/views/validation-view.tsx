@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  FileCheck2,
   Gauge,
   ScanEye,
   ShieldAlert,
@@ -117,7 +118,7 @@ const MUTED = "#8296b3";
 // Helpers
 // ────────────────────────────────────────────────────────────
 
-/** Sample standard deviation — sens 92.5 ± 1.4 / spec 93.8 ± 1.0 falls out of this. */
+/** Sample standard deviation for any available validation runs. */
 function meanStd(values: number[]): { mean: number; std: number } {
   if (values.length === 0) return { mean: 0, std: 0 };
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
@@ -252,7 +253,6 @@ export default function ValidationView() {
     { icon: Activity, value: headline.sensitivity, decimals: 1, suffix: "%", label: "Sensitivity", caption: "Referable DR detected (R≥2)" },
     { icon: ShieldCheck, value: headline.specificity, decimals: 1, suffix: "%", label: "Specificity", caption: "Non-referable correctly cleared" },
     { icon: Gauge, value: headline.qwk, decimals: 3, suffix: "", label: "QWK", caption: "Quadratic weighted kappa — 5-class" },
-    { icon: TrendingUp, value: headline.auc, decimals: 3, suffix: "", label: "AUC", caption: "ROC area under curve" },
   ];
 
   return (
@@ -260,7 +260,7 @@ export default function ValidationView() {
       <SectionHeading
         eyebrow="VALIDATION & EVIDENCE"
         title="Numbers we can defend"
-        sub="Every figure on this page comes from our own validation pipeline — 550 held-out APTOS images, three independent training runs, and an honest look at where the model is wrong."
+        sub="Every headline figure on this page comes from the MATLAB ResNet-101 result — 550 held-out APTOS images and an honest look at where the model is wrong."
       />
 
       <div className="space-y-12 sm:space-y-14">
@@ -269,7 +269,7 @@ export default function ValidationView() {
           <BlockHeading
             index="01"
             title="Headline results"
-            sub={`Validated on ${headline.dataset} · ${headline.runs.length} training runs — seeds ${headline.runs.map((r) => r.seed).join(" · ")}`}
+            sub={`Validated on ${headline.dataset} · ${headline.runs[0]?.run ?? "MATLAB validation"}`}
           />
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             {headlineCards.map((card) => (
@@ -513,7 +513,7 @@ export default function ValidationView() {
           <BlockHeading
             index="04"
             title="Training stability"
-            sub="Three independent seeds, identical hyperparameters. The curves converge to the same place — that is what makes the headline numbers repeatable."
+            sub="The uploaded MATLAB artifact provides one recorded validation run; additional independent runs should be reported only after they are evaluated on held-out data."
           />
           <GlassCard>
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
@@ -719,6 +719,10 @@ export default function ValidationView() {
                 <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
                   <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#34D399]" aria-hidden="true" />
                   <span>Thresholds and numbers are identical across console, API and website.</span>
+                </p>
+                <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
+                  <FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FBBF24]" aria-hidden="true" />
+                  <span>Source artifact: model_and_result/drishti_dr_model.mat + DRISHTI Module 3 - Confusion Matrix.png · MATLAB ResNet-101.</span>
                 </p>
               </div>
             </div>

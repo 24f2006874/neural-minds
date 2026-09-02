@@ -54,6 +54,18 @@ const AMBER = "#FBBF24";
 const RED = "#F87171";
 const AXIS = "#8296B3";
 
+const MATLAB_BASELINE = {
+  cameras: 2,
+  reviewers: 1,
+  arrivalRate: 20,
+  cameraUtilization: 82.2,
+  reviewerUtilization: 16.4,
+  averageWait: 4.75,
+  completedPatients: 3287,
+  status: "ACCEPTABLE",
+  patientsPerYear: 394440,
+} as const;
+
 /** Dashed comparison-curve colors for the district-scaling chart overlay. */
 const PRESET_COMPARE_COLORS: Record<PresetKey, string> = {
   phc: "#8296B3",
@@ -292,7 +304,11 @@ export default function CapacityView() {
 
   // Chart data: current-config series, plus one dashed series per preset when comparing.
   const chartData = useMemo(() => {
-    const base = scaling.map((s) => ({ districts: s.districts, mine: s.patientsPerYear }));
+    const base = scaling.map((s) => ({
+      districts: s.districts,
+      mine: s.patientsPerYear,
+      matlab: MATLAB_BASELINE.patientsPerYear * s.districts,
+    }));
     if (compare) {
       (Object.keys(CAPACITY_PRESETS) as PresetKey[]).forEach((k) => {
         const curve = presetCurves[k];
@@ -458,6 +474,41 @@ export default function CapacityView() {
         title="Size the camp before you pitch it"
         sub="Drag the knobs — queueing math answers instantly. The difference between a demo and a district program."
       />
+
+      <Reveal className="mb-6">
+        <GlassCard className="border-[#22D3EE]/30 bg-[#22D3EE]/4 p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-2xl">
+              <span className="chip border-[#22D3EE]/35 text-[#22D3EE]">MATLAB / Simulink baseline</span>
+              <h3 className="mt-3 font-display text-xl font-bold">Capture is the first bottleneck</h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                In the recorded MATLAB simulation, {MATLAB_BASELINE.cameras} cameras handled {MATLAB_BASELINE.arrivalRate} arrivals/hour at {MATLAB_BASELINE.cameraUtilization}% utilization, while one reviewer reached only {MATLAB_BASELINE.reviewerUtilization}%. The queue remained {MATLAB_BASELINE.status.toLowerCase()} with a {MATLAB_BASELINE.averageWait}-minute average wait.
+              </p>
+            </div>
+            <div className="grid min-w-55 grid-cols-2 gap-2 text-xs sm:min-w-75 sm:grid-cols-4">
+              <div className="rounded-lg border border-[#22D3EE]/20 bg-black/15 p-3 text-center">
+                <p className="tabular font-display text-lg font-bold text-[#22D3EE]">{MATLAB_BASELINE.cameraUtilization}%</p>
+                <p className="mt-1 text-muted-foreground">cameras</p>
+              </div>
+              <div className="rounded-lg border border-[#FBBF24]/20 bg-black/15 p-3 text-center">
+                <p className="tabular font-display text-lg font-bold text-[#FBBF24]">{MATLAB_BASELINE.reviewerUtilization}%</p>
+                <p className="mt-1 text-muted-foreground">reviewer</p>
+              </div>
+              <div className="rounded-lg border border-[#34D399]/20 bg-black/15 p-3 text-center">
+                <p className="tabular font-display text-lg font-bold text-[#34D399]">{MATLAB_BASELINE.averageWait}</p>
+                <p className="mt-1 text-muted-foreground">min wait</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/15 p-3 text-center">
+                <p className="tabular font-display text-lg font-bold text-foreground">30/hr</p>
+                <p className="mt-1 text-muted-foreground">camera limit</p>
+              </div>
+            </div>
+          </div>
+          <p className="mt-4 border-t border-white/10 pt-3 text-xs leading-relaxed text-muted-foreground">
+            This is a recorded MATLAB result from `DRISHTI_M5_results.mat`; the interactive controls below run the browser capacity twin for what-if planning.
+          </p>
+        </GlassCard>
+      </Reveal>
 
       <div className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
         {/* ── 1 · Controls ─────────────────────────────────── */}
@@ -821,6 +872,17 @@ export default function CapacityView() {
                   fill="url(#capScalingFill)"
                   activeDot={{ r: 4, fill: CYAN, stroke: "#060B14" }}
                 />
+                <Area
+                  type="monotone"
+                  dataKey="matlab"
+                  name="MATLAB baseline · 2·1·20"
+                  stroke="#FB923C"
+                  strokeWidth={1.8}
+                  strokeDasharray="6 4"
+                  fill="none"
+                  dot={false}
+                  activeDot={{ r: 3, fill: "#FB923C", stroke: "#060B14" }}
+                />
                 {compare &&
                   (Object.keys(CAPACITY_PRESETS) as PresetKey[]).map((k) => (
                     <Area
@@ -839,25 +901,31 @@ export default function CapacityView() {
               </AreaChart>
             </ResponsiveContainer>
           </div>
-          {compare && (
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="Scaling chart legend">
-              <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                <span className="h-[3px] w-5 rounded-full" style={{ background: CYAN }} aria-hidden="true" />
-                Your config
-              </span>
-              {(Object.keys(CAPACITY_PRESETS) as PresetKey[]).map((k) => (
-                <span key={k} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span
-                    className="h-0 w-5 border-t-2 border-dashed"
-                    style={{ borderColor: PRESET_COMPARE_COLORS[k] }}
-                    aria-hidden="true"
-                  />
-                  {CAPACITY_PRESETS[k].label} · {CAPACITY_PRESETS[k].cams}·{CAPACITY_PRESETS[k].revw}·
-                  {CAPACITY_PRESETS[k].arr}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="Scaling chart legend">
+            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="h-0 w-5 border-t-2 border-dashed border-[#FB923C]" aria-hidden="true" />
+              MATLAB baseline · 2·1·20
+            </span>
+            {compare && (
+              <>
+                <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                  <span className="h-[3px] w-5 rounded-full" style={{ background: CYAN }} aria-hidden="true" />
+                  Your config
                 </span>
-              ))}
-            </div>
-          )}
+                {(Object.keys(CAPACITY_PRESETS) as PresetKey[]).map((k) => (
+                  <span key={k} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span
+                      className="h-0 w-5 border-t-2 border-dashed"
+                      style={{ borderColor: PRESET_COMPARE_COLORS[k] }}
+                      aria-hidden="true"
+                    />
+                    {CAPACITY_PRESETS[k].label} · {CAPACITY_PRESETS[k].cams}·{CAPACITY_PRESETS[k].revw}·
+                    {CAPACITY_PRESETS[k].arr}
+                  </span>
+                ))}
+              </>
+            )}
+          </div>
         </GlassCard>
       </Reveal>
 

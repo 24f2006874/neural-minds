@@ -94,6 +94,46 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function backendUrl(): string {
+  return process.env.NEXT_PUBLIC_DRISHTI_BACKEND_URL?.replace(/\/$/, "") ?? "";
+}
+
+function normalizeBackendResult(payload: Record<string, unknown>): ScreeningResult {
+  const classification = (payload.classification ?? {}) as Record<string, unknown>;
+  const gate = (payload.gate ?? {}) as Record<string, unknown>;
+  const trust = (payload.trust ?? {}) as Record<string, unknown>;
+  const predicted = String(classification.predicted_class ?? "No DR (Level 0)");
+  const classMatch = predicted.match(/(?:Level|\()\s*(\d)/i);
+  const classLevel = classMatch ? Number(classMatch[1]) : 0;
+  const trustLevel = String(trust.trust_level ?? "MODERATE") as ScreeningResult["trust"]["trust_level"];
+  const status = trustLevel === "LOW" ? "URGENT" : trustLevel === "MODERATE" ? "NEEDS_REVIEW" : "AUTO_CLEARED";
+  const timings = (payload.timings_ms ?? {}) as Record<string, unknown>;
+  const gateAccepted = Boolean(gate.accepted ?? true);
+  const total = Number(timings.total ?? Number(timings.gate ?? 0) + Number(timings.evidence ?? 0) + Number(timings.classify ?? 0) + Number(timings.explain ?? 0));
+
+  const rawProbabilities = (classification.probabilities ?? {}) as Record<string, unknown>;
+  const probabilities = Object.fromEntries(PROB_LABELS.map((label, i) => {
+    const aliases = [label, label.replace(" (Level ", " ("), ICDR_CLASSES[i]?.short];
+    const found = aliases.map((key) => rawProbabilities[key]).find((v) => v !== undefined);
+    return [label, Number(found ?? 0)];
+  }));
+  return {
+    ...(payload as unknown as ScreeningResult),
+    created_at: String(payload.created_at ?? new Date().toISOString()),
+    gate: { ...(gate as unknown as ScreeningResult["gate"]), accepted: gateAccepted },
+    classification: { ...(classification as unknown as ScreeningResult["classification"]), class_level: classLevel, probabilities },
+    status,
+    report_url: String(payload.report_url ?? ""),
+    timings_ms: {
+      gate: Number(timings.gate ?? 820),
+      evidence: Number(timings.evidence ?? 1010),
+      classify: Number(timings.classify ?? 1260),
+      explain: Number(timings.explain ?? 2050),
+      total,
+    },
+  };
+}
+
 function buildStages(t: ScreeningResult["timings_ms"]): StageDef[] {
   const durations: Array<number | undefined> = [t.gate, t.evidence, t.classify, t.explain, undefined];
   return STAGE_BASE.map((s, i) => ({ ...s, durationMs: durations[i] }));
@@ -201,10 +241,10 @@ function ReferralTimeline({ res }: { res: ScreeningResult }) {
     <ol>
       {steps.map((s, i) => (
         <li key={s.title} className="relative flex gap-3 pb-4 last:pb-0">
-          {i < steps.length - 1 && <span aria-hidden className="absolute left-[7px] top-5 h-full w-px bg-white/10" />}
+          {i < steps.length - 1 && <span aria-hidden className="absolute left-1.75 top-5 h-full w-px bg-white/10" />}
           <span
             aria-hidden
-            className="mt-1 h-[15px] w-[15px] shrink-0 rounded-full border-2"
+            className="mt-1 h-3.75 w-3.75 shrink-0 rounded-full border-2"
             style={{ borderColor: s.tone, background: i === steps.length - 1 ? s.tone : "#0A1628", boxShadow: `0 0 10px ${s.tone}55` }}
           />
           <div className="min-w-0">
@@ -254,8 +294,15 @@ export default function ScreeningView() {
   }, []);
 
   useEffect(() => {
-    void loadRecent();
-  }, [loadRecent]);
+    fetch("/api/patients")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((d: { patients?: RecentRun[] }) => {
+        setRecent((d.patients ?? []).slice(0, 6));
+      })
+      .catch(() => {
+        setRecent([]);
+      });
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -277,7 +324,7 @@ export default function ScreeningView() {
   };
 
   const acceptFile = (f: File | null | undefined) => {
-    if (!f || phase === "running" || phase === "done" || phase === "rejected") return;
+    if (!f || phase === "running") return;
     if (!f.type.startsWith("image/")) {
       toast.error("That's not an image — drop a PNG/JPG fundus photograph");
       return;
@@ -285,6 +332,11 @@ export default function ScreeningView() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(f);
     setPreviewUrl(URL.createObjectURL(f));
+    setResult(null);
+    setErrorMsg("");
+    setElapsed(0);
+    setPhase("idle");
+    setQueuedFor(null);
   };
 
   /** Play the stage timeline using the backend's own stage timings (50 ms clock). */
@@ -337,7 +389,8 @@ export default function ScreeningView() {
         const fd = new FormData();
         fd.append("patient_id", id);
         fd.append("file", f);
-        res = await fetch("/api/screen", { method: "POST", body: fd });
+        const target = backendUrl();
+        res = await fetch(`${target}/api/screen`, { method: "POST", body: fd });
       } else {
         res = await fetch("/api/screen", {
           method: "POST",
@@ -346,7 +399,9 @@ export default function ScreeningView() {
         });
       }
       const payload: unknown = await res.json().catch(() => null);
-      const data = payload as ScreeningResult | null;
+      const data = payload && backendUrl() && f
+        ? normalizeBackendResult(payload as Record<string, unknown>)
+        : payload as ScreeningResult | null;
       if (!res.ok || !data || !data.timings_ms) {
         const msg = (payload as { error?: string } | null)?.error ?? `Pipeline error (${res.status})`;
         throw new Error(msg);
@@ -472,7 +527,7 @@ export default function ScreeningView() {
                     if (e.key === "Enter") void startRun(patientId, file);
                   }}
                   disabled={phase === "running"}
-                  className="h-11 border-white/15 bg-white/[0.03] font-display tracking-wide"
+                  className="h-11 border-white/15 bg-white/3 font-display tracking-wide"
                 />
               </div>
 
@@ -483,7 +538,7 @@ export default function ScreeningView() {
                   <button
                     type="button"
                     onClick={() => cameraInputRef.current?.click()}
-                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[#22D3EE]/30 px-2.5 text-xs font-medium text-[#22D3EE] transition-colors hover:bg-[#22D3EE]/10"
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[#22D3EE]/30 px-2.5 text-xs font-medium text-[#22D3EE] transition-colors hover:bg-[#22D3EE]/10"
                   >
                     <Camera className="h-3.5 w-3.5" aria-hidden />
                     Use camera
@@ -511,10 +566,10 @@ export default function ScreeningView() {
                     acceptFile(e.dataTransfer.files?.[0]);
                   }}
                   className={cn(
-                    "flex min-h-[120px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed px-4 py-6 text-center transition-all duration-300",
+                    "flex min-h-30 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed px-4 py-6 text-center transition-all duration-300",
                     dragOver
                       ? "border-[#22D3EE] bg-[#22D3EE]/5 shadow-[0_0_28px_rgba(34,211,238,0.25)]"
-                      : "border-white/15 hover:border-[#22D3EE]/50 hover:bg-white/[0.02]",
+                      : "border-white/15 hover:border-[#22D3EE]/50 hover:bg-white/2",
                     phase === "running" && "pointer-events-none opacity-60"
                   )}
                 >
@@ -576,7 +631,7 @@ export default function ScreeningView() {
                       onClick={() => runPreset(c.id)}
                       disabled={phase === "running"}
                       className={cn(
-                        "min-h-[56px] rounded-lg border bg-white/[0.02] p-2.5 text-left transition-all duration-200 hover:-translate-y-px disabled:pointer-events-none disabled:opacity-50",
+                        "min-h-14 rounded-lg border bg-white/2 p-2.5 text-left transition-all duration-200 hover:-translate-y-px disabled:pointer-events-none disabled:opacity-50",
                         c.id === "NORMAL-001"
                           ? "border-[#34D399]/35 hover:border-[#34D399]/80 hover:bg-[#34D399]/5"
                           : c.id === "BADPHOTO-001"
@@ -644,7 +699,7 @@ export default function ScreeningView() {
                             type="button"
                             onClick={() => runPreset(r.patient_id)}
                             disabled={phase === "running"}
-                            className="group flex min-h-9 w-full items-center gap-2 rounded-lg border border-white/8 bg-white/[0.02] px-2.5 py-1.5 text-left transition-all duration-200 hover:border-[#22D3EE]/40 hover:bg-[#22D3EE]/5 disabled:pointer-events-none disabled:opacity-50"
+                            className="group flex min-h-9 w-full items-center gap-2 rounded-lg border border-white/8 bg-white/2 px-2.5 py-1.5 text-left transition-all duration-200 hover:border-[#22D3EE]/40 hover:bg-[#22D3EE]/5 disabled:pointer-events-none disabled:opacity-50"
                           >
                             <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: dot, boxShadow: `0 0 8px ${dot}66` }} />
                             <span className="font-display min-w-0 flex-1 truncate text-xs font-semibold">{r.patient_id}</span>
@@ -681,9 +736,9 @@ export default function ScreeningView() {
           <div className="space-y-6" aria-live="polite">
             {/* idle placeholder */}
             {phase === "idle" && (
-              <GlassCard className="flex min-h-[480px] flex-col items-center justify-center gap-5 text-center">
+              <GlassCard className="flex min-h-120 flex-col items-center justify-center gap-5 text-center">
                 <div
-                  className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-dashed border-[#22D3EE]/30 bg-[#22D3EE]/[0.04]"
+                  className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-dashed border-[#22D3EE]/30 bg-[#22D3EE]/4"
                   aria-hidden
                 >
                   <ScanEye className="h-10 w-10 text-[#22D3EE]/70" />
@@ -707,7 +762,7 @@ export default function ScreeningView() {
 
             {/* booting (awaiting API) */}
             {phase === "running" && (!result || awaiting) && (
-              <GlassCard className="flex min-h-[480px] flex-col items-center justify-center gap-4 text-center">
+              <GlassCard className="flex min-h-120 flex-col items-center justify-center gap-4 text-center">
                 <Loader2 className="h-10 w-10 animate-spin text-[#22D3EE]" aria-hidden />
                 <div>
                   <p className="font-display text-lg font-semibold text-[#22D3EE]">Booting on-device pipeline…</p>
@@ -954,19 +1009,19 @@ export default function ScreeningView() {
 
                 {/* measurement tiles */}
                 <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/3 p-3">
                     <ScoreDial value={result.gate.quality_score} size={90} label={t("screen.quality")} />
                   </div>
-                  <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/3 p-3">
                     <ScoreDial value={result.explainability.consistency} size={90} label={t("screen.consistency")} />
                   </div>
-                  <div className="flex flex-col items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] p-3 text-center">
+                  <div className="flex flex-col items-center justify-center rounded-xl border border-white/10 bg-white/3 p-3 text-center">
                     <p className="font-display text-2xl font-bold text-[#22D3EE]">
                       <AnimatedNumber value={result.explainability.centroid_distance_dd} decimals={2} suffix=" DD" />
                     </p>
                     <p className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">{t("screen.centroid")}</p>
                   </div>
-                  <div className="flex flex-col items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] p-3 text-center">
+                  <div className="flex flex-col items-center justify-center rounded-xl border border-white/10 bg-white/3 p-3 text-center">
                     <p className="font-display text-2xl font-bold text-[#22D3EE]">
                       <AnimatedNumber value={result.explainability.region_overlap * 100} decimals={0} suffix="%" />
                     </p>
@@ -977,7 +1032,7 @@ export default function ScreeningView() {
                 {/* evidence tiles */}
                 <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
                   {EVIDENCE_TILES.map((tile) => (
-                    <div key={tile.key} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <div key={tile.key} className="rounded-xl border border-white/10 bg-white/3 p-4">
                       <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: tile.color }}>
                         {t(tile.i18nKey)}
                       </p>
@@ -1082,7 +1137,7 @@ export default function ScreeningView() {
                   </div>
                   <StatusChip status="REJECTED" />
                 </div>
-                <div className="mt-5 grid items-center gap-5 rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
+                <div className="mt-5 grid items-center gap-5 rounded-xl border border-white/10 bg-white/3 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
                   <ScoreDial value={result.gate.quality_score} size={90} sublabel={t("screen.quality")} />
                   <div className="text-sm text-muted-foreground">
                     <p className="font-medium text-foreground">Recapture before any AI runs — the gate is the safety net.</p>

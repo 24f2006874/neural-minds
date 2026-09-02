@@ -1,0 +1,507 @@
+#@@CELL md
+# DRISHTI — APTOS 2019 Official Training Run 🎯
+
+**SIH 2026 | Problem Statement 26038 (MathWorks) | Team DRISHTI**
+
+This notebook trains the **official DRISHTI DR classifier**:
+- **ResNet-50** (ImageNet-initialized) — matches our MATLAB implementation & PPT story
+- **5-class ICDR grading** (Levels 0–4) on the **APTOS 2019 dataset** (3,662 labeled images, Aravind Eye Hospital, rural India)
+- Reports the metrics the problem statement demands: **referable-DR sensitivity & specificity on a held-out test set (~550 images)**, plus AUC and Quadratic Weighted Kappa
+- Produces Grad-CAM explainability samples
+
+**How to run (teammate):**
+1. Attach the APTOS dataset: right panel → **Input** → **Add Input** → Competition → `aptos2019-blindness-detection`
+2. Settings (right panel): **Accelerator → GPU T4 x2**, **Internet → On**
+3. Click **Run All** and wait ~30–45 minutes
+4. When finished, download the output files (bottom of the right panel → Output) and send them to your mentor
+
+**Do not edit any code. If a cell fails, screenshot the FULL error and send it to the mentor.**
+
+#@@CELL code
+# ============================================================
+# CELL 1: setup, configuration, reproducibility
+# ============================================================
+import os, sys, json, math, random, time, copy
+import numpy as np
+import pandas as pd
+import cv2
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+import torchvision.models as models
+import torchvision.transforms as T
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, cohen_kappa_score, roc_auc_score
+
+try:
+    from tqdm.auto import tqdm
+except Exception:
+    def tqdm(x, **k):
+        return x
+
+SEED = 42
+random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print('PyTorch :', torch.__version__)
+print('Device  :', DEVICE)
+if DEVICE.type == 'cuda':
+    print('GPU     :', torch.cuda.get_device_name(0))
+    torch.backends.cudnn.benchmark = True
+else:
+    print('WARNING: no GPU! Go to notebook Settings -> Accelerator -> GPU T4 x2, then restart and Run All again.')
+
+# ------------------- CONFIGURATION -------------------
+DATA_DIR    = '/kaggle/input/aptos2019-blindness-detection'
+OUT_DIR     = '.'
+IMG_SIZE    = 256        # training image resolution
+BATCH       = 32
+EPOCHS      = 15
+LR          = 1e-4
+NUM_WORKERS = 2
+NUM_CLASSES = 5
+CLASS_NAMES = ['No DR (0)', 'Mild NPDR (1)', 'Moderate NPDR (2)', 'Severe NPDR (3)', 'Proliferative DR (4)']
+print('Config OK: IMG_SIZE=%d  BATCH=%d  EPOCHS=%d' % (IMG_SIZE, BATCH, EPOCHS))
+
+#@@CELL code
+# ============================================================
+# CELL 2: load APTOS labels + stratified 70/15/15 split
+# (same split discipline as our STARE prototype)
+# ============================================================
+train_csv = os.path.join(DATA_DIR, 'train.csv')
+assert os.path.exists(train_csv), \
+    'train.csv not found! Attach the APTOS competition data first (see instructions at the top).'
+
+df = pd.read_csv(train_csv)
+print('Total labeled images:', len(df))
+print('Class distribution (doctor labels):')
+print(df.diagnosis.value_counts().sort_index().to_string())
+
+train_df, tmp_df   = train_test_split(df,     test_size=0.30, stratify=df.diagnosis,     random_state=SEED)
+val_df,  test_df   = train_test_split(tmp_df, test_size=0.50, stratify=tmp_df.diagnosis, random_state=SEED)
+
+print()
+print('Split: train=%d  val=%d  test=%d   (70/15/15, stratified, seed 42)' % (len(train_df), len(val_df), len(test_df)))
+print('Referable DR (level>=2) share: train %.1f%% | val %.1f%% | test %.1f%%' % (
+    100*(train_df.diagnosis >= 2).mean(),
+    100*(val_df.diagnosis   >= 2).mean(),
+    100*(test_df.diagnosis  >= 2).mean()))
+print('NOTE: the test set is NEVER used for training or threshold tuning.')
+
+#@@CELL code
+# ============================================================
+# CELL 3: dataset with fundus cropping + augmentation
+# (augmentation recipe validated in our STARE prototype v3)
+# ============================================================
+def crop_fundus(img):
+    """Remove the black border around the retina (APTOS images vary in size)."""
+    if img is None:
+        return None
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    mask = gray > 12
+    if mask.sum() < 500:
+        return img
+    ys, xs = np.where(mask)
+    y1, y2 = max(0, ys.min() - 8), min(img.shape[0], ys.max() + 8)
+    x1, x2 = max(0, xs.min() - 8), min(img.shape[1], xs.max() + 8)
+    return img[y1:y2, x1:x2]
+
+
+class FundusDataset(Dataset):
+    def __init__(self, df, img_dir, augment=False):
+        self.df = df.reset_index(drop=True)
+        self.img_dir = img_dir
+        self.augment = augment
+        self.tf_train = T.Compose([
+            T.ToPILImage(),
+            T.RandomHorizontalFlip(),
+            T.RandomVerticalFlip(p=0.3),
+            T.RandomRotation(20),
+            T.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.2, hue=0.03),
+            T.RandomResizedCrop(IMG_SIZE, scale=(0.8, 1.0)),
+            T.ToTensor(),
+            T.RandomErasing(p=0.25, scale=(0.02, 0.08)),
+            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
+        self.tf_val = T.Compose([
+            T.ToPILImage(),
+            T.ToTensor(),
+            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, i):
+        row = self.df.iloc[i]
+        path = os.path.join(self.img_dir, str(row.id_code) + '.png')
+        img = cv2.imread(path)
+        assert img is not None, 'cannot read image: ' + path
+        img = crop_fundus(img)
+        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        x = self.tf_train(rgb) if self.augment else self.tf_val(rgb)
+        return x, int(row.diagnosis)
+
+
+IMG_DIR = os.path.join(DATA_DIR, 'train_images')
+assert os.path.exists(IMG_DIR), 'train_images folder not found! Attach the APTOS competition data first.'
+
+loaders = {
+    'train': DataLoader(FundusDataset(train_df, IMG_DIR, augment=True),
+                        batch_size=BATCH, shuffle=True,  num_workers=NUM_WORKERS,
+                        pin_memory=(DEVICE.type == 'cuda')),
+    'val':   DataLoader(FundusDataset(val_df,   IMG_DIR, augment=False),
+                        batch_size=BATCH, shuffle=False, num_workers=NUM_WORKERS,
+                        pin_memory=(DEVICE.type == 'cuda')),
+    'test':  DataLoader(FundusDataset(test_df,  IMG_DIR, augment=False),
+                        batch_size=BATCH, shuffle=False, num_workers=NUM_WORKERS,
+                        pin_memory=(DEVICE.type == 'cuda')),
+}
+
+# sanity check: push ONE image through the full pipeline
+_x, _y = FundusDataset(train_df, IMG_DIR, augment=False)[0]
+print('Sanity check OK: image tensor', tuple(_x.shape), '| label', _y)
+
+#@@CELL code
+# ============================================================
+# CELL 4: the OFFICIAL DRISHTI model — ResNet-50, 5-class
+# + class-balanced loss (gentle sqrt weights + label smoothing,
+#   the recipe that fixed specificity in our STARE prototype v3)
+# ============================================================
+def build_model():
+    net = None
+    try:
+        net = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+        print('Loaded ImageNet ResNet-50 weights (internet OK)')
+    except Exception as e:
+        print('Online weight download failed (%s) — trying offline copies...' % type(e).__name__)
+        net = models.resnet50()
+        loaded = False
+        for p in ['/kaggle/input/pretrained-pytorch-models/resnet50-19c8e357.pth',
+                  '/kaggle/input/pytorch-pretrained-image-models/resnet50-19c8e357.pth']:
+            if os.path.exists(p):
+                net.load_state_dict(torch.load(p, map_location='cpu'))
+                print('Loaded offline weights from:', p)
+                loaded = True
+                break
+        if not loaded:
+            print('WARNING: no pretrained weights found — training from scratch (results will be worse).')
+    net.fc = nn.Linear(net.fc.in_features, NUM_CLASSES)
+    return net.to(DEVICE)
+
+
+model = build_model()
+
+counts = train_df.diagnosis.value_counts().sort_index().reindex(range(NUM_CLASSES)).fillna(1).values
+w = np.sqrt(len(train_df) / (NUM_CLASSES * counts))
+class_weights = torch.tensor(w, dtype=torch.float32).to(DEVICE)
+print('Train class counts :', counts.tolist())
+print('Loss weights (sqrt):', np.round(w, 3).tolist())
+
+criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
+
+#@@CELL code
+# ============================================================
+# CELL 5: training loop (best model saved by validation QWK)
+# ============================================================
+def evaluate(model, loader):
+    model.eval()
+    ys, ps, loss_sum, n = [], [], 0.0, 0
+    with torch.no_grad():
+        for x, y in loader:
+            x, y = x.to(DEVICE), y.to(DEVICE)
+            logits = model(x)
+            loss_sum += criterion(logits, y).item() * x.size(0)
+            n += x.size(0)
+            ps.append(torch.softmax(logits, 1).cpu())
+            ys.append(y.cpu())
+    P = torch.cat(ps).numpy()
+    Y = torch.cat(ys).numpy()
+    pred = P.argmax(1)
+    acc = float((pred == Y).mean())
+    qwk = float(cohen_kappa_score(Y, pred, weights='quadratic'))
+    ref_t, ref_p = (Y >= 2), (P[:, 2:].sum(1) >= 0.5)
+    sens = float(ref_p[ref_t].mean()) if ref_t.any() else 0.0
+    spec = float((~ref_p[~ref_t]).mean()) if (~ref_t).any() else 0.0
+    return loss_sum / n, acc, qwk, sens, spec, P, Y
+
+
+history, best_qwk, best_state = [], -1.0, None
+print()
+print('==================== TRAINING STARTS ====================')
+for epoch in range(1, EPOCHS + 1):
+    t0 = time.time()
+    model.train()
+    tr_loss, tr_correct, tr_n = 0.0, 0, 0
+    for x, y in tqdm(loaders['train'], desc='epoch %d/%d' % (epoch, EPOCHS), leave=False):
+        x, y = x.to(DEVICE), y.to(DEVICE)
+        optimizer.zero_grad()
+        logits = model(x)
+        loss = criterion(logits, y)
+        loss.backward()
+        optimizer.step()
+        tr_loss += loss.item() * x.size(0)
+        tr_correct += (logits.argmax(1) == y).sum().item()
+        tr_n += x.size(0)
+    scheduler.step()
+
+    v_loss, v_acc, v_qwk, v_sens, v_spec, _, _ = evaluate(model, loaders['val'])
+    dt = time.time() - t0
+    history.append(dict(epoch=epoch, train_loss=tr_loss / tr_n, train_acc=tr_correct / tr_n,
+                        val_loss=v_loss, val_acc=v_acc, val_qwk=v_qwk,
+                        val_ref_sens=v_sens, val_ref_spec=v_spec))
+    star = ''
+    if v_qwk >= best_qwk:
+        best_qwk = v_qwk
+        best_state = copy.deepcopy(model.state_dict())
+        star = '   <- best so far (checkpoint saved)'
+    print('epoch %2d/%d | %3.0fs | train loss %.4f acc %.3f | VAL acc %.3f QWK %.3f | referable sens %.2f spec %.2f%s'
+          % (epoch, EPOCHS, dt, tr_loss / tr_n, tr_correct / tr_n, v_acc, v_qwk, v_sens, v_spec, star))
+
+print()
+print('Best validation QWK: %.4f' % best_qwk)
+
+#@@CELL code
+# ============================================================
+# CELL 6: operating-threshold selection (on VALIDATION only!)
+#          + FINAL evaluation on the HELD-OUT TEST SET
+# ============================================================
+model.load_state_dict(best_state)
+_, _, _, _, _, P_val,  Y_val  = evaluate(model, loaders['val'])
+_, _, _, _, _, P_test, Y_test = evaluate(model, loaders['test'])
+
+p_ref_val  = P_val[:, 2:].sum(1)    # P(level >= 2) = referable DR probability
+p_ref_test = P_test[:, 2:].sum(1)
+
+# ---- choose the referable-DR threshold on VALIDATION (never on test) ----
+rows = []
+for thr in np.arange(0.05, 0.96, 0.01):
+    sens_v = float((p_ref_val >= thr)[Y_val >= 2].mean())
+    spec_v = float((p_ref_val <  thr)[Y_val <  2].mean())
+    rows.append((float(thr), sens_v, spec_v))
+eligible = [r for r in rows if r[1] >= 0.90]
+if eligible:
+    THR = max(eligible, key=lambda r: r[2])[0]
+    thr_note = 'validation sensitivity >= 90% achieved; threshold set to maximize specificity'
+else:
+    THR = max(rows, key=lambda r: r[1] + r[2])[0]
+    thr_note = 'WARNING: 90% sensitivity not reachable on validation — threshold set to best balanced point. Report this honestly!'
+print('Chosen referable-DR threshold: %.2f' % THR)
+print('(%s)' % thr_note)
+
+# ---- FINAL TEST METRICS ----
+pred5 = P_test.argmax(1)
+ref_true, ref_pred = (Y_test >= 2), (p_ref_test >= THR)
+tp = int((ref_true &  ref_pred).sum())
+fn = int((ref_true & ~ref_pred).sum())
+tn = int((~ref_true & ~ref_pred).sum())
+fp = int((~ref_true &  ref_pred).sum())
+sens = tp / (tp + fn)
+spec = tn / (tn + fp)
+acc  = float((pred5 == Y_test).mean())
+qwk  = float(cohen_kappa_score(Y_test, pred5, weights='quadratic'))
+
+try:
+    auc_macro = float(roc_auc_score(Y_test, P_test, multi_class='ovr', average='macro'))
+except Exception as e:
+    auc_macro = None
+    print('(macro AUC skipped: %s)' % type(e).__name__)
+try:
+    auc_ref = float(roc_auc_score(ref_true.astype(int), p_ref_test))
+except Exception as e:
+    auc_ref = None
+    print('(referable AUC skipped: %s)' % type(e).__name__)
+
+cm = confusion_matrix(Y_test, pred5, labels=list(range(NUM_CLASSES)))
+per_class_recall = {}
+for i in range(NUM_CLASSES):
+    per_class_recall[CLASS_NAMES[i]] = round(float(cm[i, i] / cm[i].sum()), 3) if cm[i].sum() else None
+
+print()
+print('=' * 70)
+print('FINAL HELD-OUT TEST RESULTS  (n = %d images, never seen during training)' % len(Y_test))
+print('=' * 70)
+print('REFERABLE DR (level >= 2) at threshold %.2f:' % THR)
+print('   SENSITIVITY : %5.1f%%   (found %d of %d true DR cases)' % (100 * sens, tp, tp + fn))
+print('   SPECIFICITY : %5.1f%%   (correctly cleared %d of %d non-referable)' % (100 * spec, tn, tn + fp))
+print('   false referrals: %d  |  missed DR cases: %d' % (fp, fn))
+print('Overall 5-class accuracy : %.1f%%' % (100 * acc))
+print('Quadratic Weighted Kappa : %.3f' % qwk)
+if auc_macro:
+    print('AUC (macro, one-vs-rest)  : %.3f' % auc_macro)
+if auc_ref:
+    print('AUC (referable DR)        : %.3f' % auc_ref)
+print('Per-class recall:', json.dumps(per_class_recall))
+
+met_s, met_p = sens > 0.90, spec > 0.85
+if met_s and met_p:
+    verdict = 'BOTH PS TARGETS MET (sens>90%, spec>85%)'
+elif met_s:
+    verdict = 'sensitivity target met; specificity below 85% — report honestly'
+elif met_p:
+    verdict = 'specificity target met; sensitivity below 90% — report honestly'
+else:
+    verdict = 'targets not met on this run — report honestly'
+print()
+print('PROBLEM-STATEMENT TARGETS (sensitivity>90%, specificity>85%):')
+print('   -> ' + verdict)
+
+#@@CELL code
+# ============================================================
+# CELL 7: training curves + confusion matrix (for your slides!)
+# ============================================================
+fig, axes = plt.subplots(1, 3, figsize=(16, 4.2))
+ep = [h['epoch'] for h in history]
+axes[0].plot(ep, [h['train_loss'] for h in history], 'o-', label='train loss')
+axes[0].plot(ep, [h['val_loss'] for h in history], 's-', label='val loss')
+axes[0].set_title('Loss'); axes[0].set_xlabel('epoch'); axes[0].legend(); axes[0].grid(alpha=0.3)
+axes[1].plot(ep, [h['train_acc'] for h in history], 'o-', label='train acc')
+axes[1].plot(ep, [h['val_acc'] for h in history], 's-', label='val acc')
+axes[1].set_title('Accuracy'); axes[1].set_xlabel('epoch'); axes[1].legend(); axes[1].grid(alpha=0.3)
+axes[2].plot(ep, [h['val_qwk'] for h in history], 'o-', color='green', label='val QWK')
+axes[2].plot(ep, [h['val_ref_sens'] for h in history], 's--', color='red', label='val referable sens')
+axes[2].plot(ep, [h['val_ref_spec'] for h in history], '^--', color='blue', label='val referable spec')
+axes[2].set_title('Validation metrics'); axes[2].set_xlabel('epoch'); axes[2].legend(); axes[2].grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, 'drishti_aptos_training_curves.png'), dpi=120)
+plt.show()
+
+fig, ax = plt.subplots(figsize=(7, 6))
+ax.imshow(cm, cmap='Blues')
+ax.set_xticks(range(NUM_CLASSES)); ax.set_yticks(range(NUM_CLASSES))
+ax.set_xticklabels([c.split(' (')[0] for c in CLASS_NAMES], rotation=30, ha='right')
+ax.set_yticklabels([c.split(' (')[0] for c in CLASS_NAMES])
+ax.set_xlabel('AI prediction'); ax.set_ylabel("Doctor's label")
+ax.set_title('DRISHTI (ResNet-50) on APTOS — test confusion matrix (n=%d)' % len(Y_test))
+for i in range(NUM_CLASSES):
+    for j in range(NUM_CLASSES):
+        ax.text(j, i, cm[i, j], ha='center', va='center', fontsize=11,
+                color='white' if cm[i, j] > cm.max() / 2 else 'black')
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, 'drishti_aptos_confusion_matrix.png'), dpi=120)
+plt.show()
+print('Saved: drishti_aptos_training_curves.png + drishti_aptos_confusion_matrix.png')
+
+#@@CELL code
+# ============================================================
+# CELL 8: Grad-CAM samples (explainability proof, like Module 4)
+# ============================================================
+def gradcam_for(model, img_bgr):
+    img = crop_fundus(img_bgr)
+    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    tf = T.Compose([T.ToPILImage(), T.ToTensor(),
+                    T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+    x = tf(rgb).unsqueeze(0).requires_grad_(True).to(DEVICE)
+    acts, grads = {}, {}
+    h1 = model.layer4[-1].conv2.register_forward_hook(
+        lambda m, i, o: acts.__setitem__('a', o.detach()))
+    h2 = model.layer4[-1].conv2.register_full_backward_hook(
+        lambda m, gi, go: grads.__setitem__('g', go[0].detach()))
+    try:
+        logits = model(x)
+        cls = int(logits.argmax(1))
+        logits[0, cls].backward()
+    finally:
+        h1.remove(); h2.remove()
+    w_ = grads['g'].mean(dim=(2, 3), keepdim=True)
+    cam = F.relu((w_ * acts['a']).sum(1))[0].cpu()
+    cam = F.interpolate(cam[None, None], size=(img.shape[0], img.shape[1]),
+                        mode='bilinear', align_corners=False)[0, 0].numpy()
+    cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+    return cls, cam, rgb
+
+
+idx_ref = np.where(Y_test >= 2)[0][:2].tolist()
+idx_no  = np.where(Y_test <  2)[0][:2].tolist()
+fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+for row, idxs in enumerate([idx_ref, idx_no]):
+    for col, ti in enumerate(idxs[:2]):
+        code = str(test_df.iloc[ti].id_code)
+        img = cv2.imread(os.path.join(IMG_DIR, code + '.png'))
+        cls, cam, rgb = gradcam_for(model, img)
+        heat = cv2.applyColorMap((cam * 255).astype(np.uint8), cv2.COLORMAP_JET)
+        heat = cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
+        overlay = (0.45 * rgb + 0.55 * heat).astype(np.uint8)
+        axes[row, 2 * col].imshow(rgb); axes[row, 2 * col].axis('off')
+        axes[row, 2 * col].set_title('true: %s | AI: %s' % (
+            CLASS_NAMES[Y_test[ti]].split(' (')[0], CLASS_NAMES[cls].split(' (')[0]), fontsize=10)
+        axes[row, 2 * col + 1].imshow(overlay); axes[row, 2 * col + 1].axis('off')
+        axes[row, 2 * col + 1].set_title('Grad-CAM attention', fontsize=10)
+plt.suptitle('DRISHTI explainability on APTOS test images (top rows: referable DR, bottom: non-referable)', fontsize=12)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, 'drishti_aptos_gradcam_samples.png'), dpi=120)
+plt.show()
+print('Saved: drishti_aptos_gradcam_samples.png')
+
+#@@CELL code
+# ============================================================
+# CELL 9: save EVERYTHING (download these files afterwards!)
+# ============================================================
+metrics = {
+    'dataset': 'APTOS 2019 (train split 70/15/15, stratified, seed 42)',
+    'model': 'ResNet-50 (ImageNet init), 5-class ICDR — official DRISHTI architecture',
+    'n_train': int(len(train_df)), 'n_val': int(len(val_df)), 'n_test': int(len(Y_test)),
+    'referable_threshold': round(float(THR), 2),
+    'threshold_note': thr_note,
+    'referable_sensitivity': round(float(sens), 4),
+    'referable_specificity': round(float(spec), 4),
+    'false_referrals': fp, 'missed_dr_cases': fn,
+    'accuracy_5class': round(float(acc), 4),
+    'quadratic_weighted_kappa': round(qwk, 4),
+    'auc_macro_ovr': (round(auc_macro, 4) if auc_macro else None),
+    'auc_referable': (round(auc_ref, 4) if auc_ref else None),
+    'per_class_recall': per_class_recall,
+    'confusion_matrix': cm.tolist(),
+    'class_names': CLASS_NAMES,
+    'img_size': IMG_SIZE,
+    'epochs': EPOCHS,
+    'best_val_qwk': round(float(best_qwk), 4),
+}
+with open(os.path.join(OUT_DIR, 'drishti_aptos_results.json'), 'w') as f:
+    json.dump(metrics, f, indent=2)
+
+torch.save({'state_dict': best_state, 'classes': CLASS_NAMES,
+            'img_size': IMG_SIZE, 'referable_threshold': round(float(THR), 2)},
+           os.path.join(OUT_DIR, 'drishti_aptos_resnet50.pt'))
+
+preds_out = test_df[['id_code', 'diagnosis']].copy()
+preds_out['predicted_level'] = pred5
+preds_out['p_referable'] = np.round(p_ref_test, 4)
+preds_out.to_csv(os.path.join(OUT_DIR, 'drishti_aptos_test_predictions.csv'), index=False)
+
+print('=' * 70)
+print('ALL DONE! Files saved in this notebook output (download them all):')
+for f in ['drishti_aptos_results.json',
+          'drishti_aptos_resnet50.pt',
+          'drishti_aptos_confusion_matrix.png',
+          'drishti_aptos_training_curves.png',
+          'drishti_aptos_gradcam_samples.png',
+          'drishti_aptos_test_predictions.csv']:
+    print('   - ' + f)
+print()
+print('NEXT STEP: download these files and send them to your mentor.')
+print('Screenshot the FINAL TEST RESULTS block above too — that is your new Slide 13!')
+
+#@@CELL md
+## 📤 After the run finishes — what to do
+
+1. **Right panel → Output → download all 6 files**
+2. Send to your mentor (chat or USB):
+   - `drishti_aptos_results.json` ← the real metrics
+   - `drishti_aptos_confusion_matrix.png` ← goes on Slide 13
+   - `drishti_aptos_training_curves.png` ← proof of honest training
+   - `drishti_aptos_gradcam_samples.png` ← explainability proof
+   - a **screenshot of the FINAL TEST RESULTS** printout
+3. Keep `drishti_aptos_resnet50.pt` and `drishti_aptos_test_predictions.csv` safe —
+   we need them for tomorrow's **"integrated pipeline vs single CNN"** experiment.
+
+**Honesty rule:** whatever numbers come out — those are our numbers. We report them exactly as they are.

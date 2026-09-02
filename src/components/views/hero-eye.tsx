@@ -321,9 +321,9 @@ function EyeRig() {
     // responsive framing: eye right on desktop, up-top on portrait screens
     const aspect = state.size.width / Math.max(1, state.size.height);
     const desktop = aspect >= 1.05;
-    g.position.x = THREE.MathUtils.damp(g.position.x, desktop ? 1.55 : 0, 3, delta);
+    g.position.x = THREE.MathUtils.damp(g.position.x, desktop ? 2.05 : 0, 3, delta);
     g.position.y = THREE.MathUtils.damp(g.position.y, desktop ? 0 : 1.0, 3, delta);
-    const target = desktop ? 1 : Math.min(1, Math.max(0.55, aspect * 0.95));
+    const target = desktop ? 0.81 : Math.min(1, Math.max(0.55, aspect * 0.95));
     g.scale.setScalar(THREE.MathUtils.damp(g.scale.x, target, 3, delta));
 
     // iris dilation "breathing": 1 ↔ 1.06 on a ~4s sine cycle

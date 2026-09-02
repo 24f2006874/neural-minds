@@ -1,0 +1,71 @@
+{
+  "dataset": "APTOS 2019 (train split 70/15/15, stratified, seed 42)",
+  "model": "ResNet-50 (ImageNet init), 5-class ICDR \u2014 official DRISHTI architecture",
+  "n_train": 2563,
+  "n_val": 549,
+  "n_test": 550,
+  "referable_threshold": 0.6,
+  "threshold_note": "validation sensitivity >= 90% achieved; threshold set to maximize specificity",
+  "referable_sensitivity": 0.9103,
+  "referable_specificity": 0.9602,
+  "false_referrals": 13,
+  "missed_dr_cases": 20,
+  "accuracy_5class": 0.8164,
+  "quadratic_weighted_kappa": 0.8947,
+  "auc_macro_ovr": 0.9349,
+  "auc_referable": 0.9745,
+  "per_class_recall": {
+    "No DR (0)": 0.967,
+    "Mild NPDR (1)": 0.661,
+    "Moderate NPDR (2)": 0.767,
+    "Severe NPDR (3)": 0.517,
+    "Proliferative DR (4)": 0.455
+  },
+  "confusion_matrix": [
+    [
+      262,
+      8,
+      1,
+      0,
+      0
+    ],
+    [
+      5,
+      37,
+      13,
+      0,
+      1
+    ],
+    [
+      2,
+      12,
+      115,
+      21,
+      0
+    ],
+    [
+      1,
+      0,
+      6,
+      15,
+      7
+    ],
+    [
+      1,
+      2,
+      10,
+      11,
+      20
+    ]
+  ],
+  "class_names": [
+    "No DR (0)",
+    "Mild NPDR (1)",
+    "Moderate NPDR (2)",
+    "Severe NPDR (3)",
+    "Proliferative DR (4)"
+  ],
+  "img_size": 256,
+  "epochs": 15,
+  "best_val_qwk": 0.8771
+}

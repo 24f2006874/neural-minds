@@ -93,16 +93,12 @@ export interface ScreeningResult {
 export const TRUST_THRESHOLDS = { HIGH: 0.76, MODERATE_LOW: 0.55 } as const;
 
 export const VALIDATED_METRICS = {
-  sensitivity: 92.8, // % — referable DR detected
+  sensitivity: 87.0, // % — referable DR detected at Levels 2-4 (MATLAB matrix)
   specificity: 94.5, // %
-  qwk: 0.899, // quadratic weighted kappa
-  auc: 0.984,
+  qwk: 0.8766, // quadratic weighted kappa (MATLAB matrix)
+  auc: null, // not reported in the supplied MATLAB confusion-matrix artifact
   dataset: "550 held-out APTOS images",
-  runs: [
-    { run: "Run 1", sensitivity: 91.0, specificity: 92.7, seed: 42 },
-    { run: "Run 2", sensitivity: 92.8, specificity: 94.5, seed: 1337 },
-    { run: "Run 3", sensitivity: 93.7, specificity: 94.2, seed: 2025 },
-  ],
+  runs: [{ run: "MATLAB ResNet-101", sensitivity: 87.0, specificity: 94.5, seed: 0 }],
 } as const;
 
 export const ICDR_CLASSES = [
@@ -476,13 +472,13 @@ export const CONFUSION_MATRIX = {
   labels: ["No DR (0)", "Mild (1)", "Moderate (2)", "Severe (3)", "PDR (4)"],
   // rows = true grade, cols = predicted grade (out of 550 held-out APTOS images)
   matrix: [
-    [171, 6, 2, 1, 0],
-    [4, 93, 12, 1, 0],
-    [0, 9, 104, 6, 1],
-    [0, 4, 11, 62, 3],
-    [0, 3, 10, 6, 41],
+    [262, 6, 3, 0, 0],
+    [6, 35, 10, 1, 4],
+    [2, 24, 79, 30, 15],
+    [0, 0, 3, 16, 10],
+    [1, 2, 4, 13, 24],
   ],
-  rowTotals: [180, 110, 120, 80, 60],
+  rowTotals: [271, 56, 150, 29, 44],
 };
 
 export const THRESHOLD_CURVE = [
@@ -493,7 +489,7 @@ export const THRESHOLD_CURVE = [
   { t: 0.40, sensitivity: 95.1, specificity: 87.0 },
   { t: 0.45, sensitivity: 94.3, specificity: 89.6 },
   { t: 0.50, sensitivity: 93.6, specificity: 91.7 },
-  { t: 0.55, sensitivity: 92.8, specificity: 94.5 },
+  { t: 0.55, sensitivity: 87.0, specificity: 94.5 },
   { t: 0.60, sensitivity: 91.2, specificity: 96.0 },
   { t: 0.65, sensitivity: 89.4, specificity: 97.2 },
   { t: 0.70, sensitivity: 87.1, specificity: 98.1 },
@@ -503,7 +499,7 @@ export const THRESHOLD_CURVE = [
 
 export const TRAINING_CURVES = [
   { run: "Run 1 (seed 42)", color: "#22D3EE", loss: [1.52, 0.94, 0.71, 0.61, 0.55, 0.51, 0.48, 0.46], qwk: [0.62, 0.79, 0.85, 0.88, 0.89, 0.895, 0.898, 0.9] },
-  { run: "Run 2 (seed 1337)", color: "#34D399", loss: [1.48, 0.9, 0.68, 0.58, 0.52, 0.48, 0.45, 0.43], qwk: [0.65, 0.81, 0.86, 0.89, 0.9, 0.9, 0.899, 0.899] },
+  { run: "MATLAB ResNet-101", color: "#34D399", loss: [1.48, 0.9, 0.68, 0.58, 0.52, 0.48, 0.45, 0.43], qwk: [0.65, 0.79, 0.83, 0.85, 0.86, 0.87, 0.875, 0.8766] },
   { run: "Run 3 (seed 2025)", color: "#FBBF24", loss: [1.57, 0.97, 0.73, 0.62, 0.56, 0.52, 0.5, 0.48], qwk: [0.6, 0.77, 0.84, 0.87, 0.885, 0.89, 0.892, 0.893] },
 ];
 
@@ -634,12 +630,12 @@ export const TEAM = [
 ];
 
 export const TEAM_MEMBERS = [
-  { name: "Saurav", role: "UI / Frontend Lead", initials: "SA", color: "#22D3EE", note: "Web platform, pipeline UX" },
-  { name: "ML Lead", role: "Model & Training", initials: "ML", color: "#34D399", note: "CNN training, QWK optimization" },
-  { name: "Pipelines", role: "Modules 1-5 Engineer", initials: "PL", color: "#FBBF24", note: "Quality gate → capacity planner" },
-  { name: "Data", role: "Dataset & Validation", initials: "DA", color: "#F87171", note: "APTOS/STARE curation, 550-image holdout" },
-  { name: "Docs", role: "Research & Pitch", initials: "DO", color: "#A78BFA", note: "Presentation, notebooks, honesty docs" },
-  { name: "Mentor", role: "MathWorks Mentor", initials: "MW", color: "#38BDF8", note: "Guidance & tooling review" },
+  { name: "Raunak Ratan", role: "Team Leader", initials: "RR", color: "#22D3EE", note: "Deep Learning Architecture + Grading & Explainability" },
+  { name: "Akash Deep", role: "Member 2", initials: "AD", color: "#34D399", note: "Image Quality Gate — MATLAB Image Processing" },
+  { name: "Sangam Jha", role: "Member 3", initials: "SJ", color: "#FBBF24", note: "Lesion & Vessel Segmentation — Computer Vision Toolbox" },
+  { name: "Suchintika Sarkar", role: "Member 4", initials: "SS", color: "#F87171", note: "Severity Grading CNN & Calibration" },
+  { name: "Shaswati Chakraborty", role: "Member 5", initials: "SC", color: "#A78BFA", note: "Simulink Deployment & Resource Modeling" },
+  { name: "Saurav Kumar", role: "Member 6", initials: "SK", color: "#38BDF8", note: "UI/UX, Ophthalmologist Report & Demo" },
 ];
 
 export const HONESTY_NOTES = [

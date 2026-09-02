@@ -70,6 +70,5 @@ server.log
 
 # Large model/release binaries. Host these with Git LFS or a release asset,
 # and document a download link instead of committing them to normal Git.
-*.onnx
-*.pt
+
 *.zip

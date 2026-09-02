@@ -155,7 +155,7 @@ export function downloadReportPdf(result: ScreeningResult) {
   doc.setFontSize(7.8);
   doc.setTextColor(120, 135, 155);
   const honesty = [
-    `Validated on ${VALIDATED_METRICS.dataset}: sensitivity ${VALIDATED_METRICS.sensitivity}% · specificity ${VALIDATED_METRICS.specificity}% · QWK ${VALIDATED_METRICS.qwk} · AUC ${VALIDATED_METRICS.auc}.`,
+    `Validated on ${VALIDATED_METRICS.dataset}: sensitivity ${VALIDATED_METRICS.sensitivity}% · specificity ${VALIDATED_METRICS.specificity}% · QWK ${VALIDATED_METRICS.qwk}.`,
     "Research prototype — not a certified clinical device. Data: APTOS 2019, Aravind Eye Hospital (Kaggle); vessels: STARE (Clemson).",
     "Team Neural Minds · SIH 2026 · PS 26038 (MathWorks)",
   ];
@@ -328,7 +328,7 @@ export function downloadRegisterPdf(rows: RegisterRow[]) {
   doc.setFontSize(7.5);
   doc.setTextColor(120, 135, 155);
   const honesty = [
-    `Model: sensitivity ${VALIDATED_METRICS.sensitivity}% · specificity ${VALIDATED_METRICS.specificity}% · QWK ${VALIDATED_METRICS.qwk} · AUC ${VALIDATED_METRICS.auc} (${VALIDATED_METRICS.dataset}).`,
+    `Model: sensitivity ${VALIDATED_METRICS.sensitivity}% · specificity ${VALIDATED_METRICS.specificity}% · QWK ${VALIDATED_METRICS.qwk} (${VALIDATED_METRICS.dataset}).`,
     "Research prototype — not a certified clinical device. AI grading assists; every signed case above was approved by the reviewing doctor.",
     "Team Neural Minds · SIH 2026 · PS 26038 (MathWorks)",
   ];

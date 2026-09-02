@@ -34,7 +34,7 @@ const RESOURCES: Array<{ title: string; desc: string; icon: LucideIcon; href: st
   },
   {
     title: "Colab notebook — training & validation",
-    desc: `End-to-end CNN training, ${VALIDATED_METRICS.runs.length}-seed validation runs and QWK ${VALIDATED_METRICS.qwk} evaluation.`,
+    desc: `End-to-end CNN training, MATLAB validation and QWK ${VALIDATED_METRICS.qwk} evaluation.`,
     icon: NotebookPen,
     href: "https://colab.research.google.com",
   },
@@ -152,7 +152,7 @@ export default function AboutView() {
               </div>
             </div>
             <p className="mt-3 text-center text-xs text-muted-foreground/80">
-              Validated on {VALIDATED_METRICS.dataset} · {VALIDATED_METRICS.runs.length} training runs — full table in the Validation view.
+              Validated on {VALIDATED_METRICS.dataset} · MATLAB ResNet-101 confusion-matrix evaluation — full evidence in the Validation view.
             </p>
           </div>
         </div>
@@ -244,6 +244,12 @@ export default function AboutView() {
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FBBF24]" aria-hidden="true" />
             <p className="text-xs leading-relaxed text-muted-foreground">
               All dashboard/demo records on this site are simulated for demonstration — labeled as demo.
+            </p>
+          </div>
+          <div className="mt-5 border-t border-white/8 pt-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#22D3EE]">MATLAB evidence included</p>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              Trained model: model_and_result/drishti_dr_model.mat · Capacity output: DRISHTI_M5_results.mat · Example report and utilization graph are recorded MATLAB outputs. The live public API uses the portable Python fallback unless MATLAB Engine is connected.
             </p>
           </div>
         </div>

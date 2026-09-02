@@ -1,0 +1,28 @@
+{
+  "n_test": 19,
+  "accuracy": 0.895,
+  "referable_sensitivity": 1.0,
+  "referable_specificity": 0.833,
+  "confusion_matrix": [
+    [
+      5,
+      1,
+      0
+    ],
+    [
+      0,
+      9,
+      1
+    ],
+    [
+      0,
+      0,
+      3
+    ]
+  ],
+  "class_names": [
+    "No DR (Level 0)",
+    "NPDR - Referable (Level 2-3)",
+    "PDR - Urgent (Level 4)"
+  ]
+}

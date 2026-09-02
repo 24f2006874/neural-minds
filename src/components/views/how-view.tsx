@@ -7,11 +7,16 @@ import {
   BrainCircuit,
   Camera,
   Cpu,
+  Database,
+  FileCheck2,
+  FlaskConical,
   Microscope,
+  Network,
   Scale,
   ScanSearch,
   ShieldCheck,
   Users,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import { GlassCard, Reveal, SectionHeading } from "@/components/drishti/primitives";
@@ -66,6 +71,75 @@ const MODULES: ModuleDef[] = [
     copy: "Trust decides routing: HIGH auto-clears, MODERATE waits for a doctor, LOW/urgent jumps the queue — and the planner sizes camps so the queue stays short.",
   },
 ];
+
+const IMPLEMENTATION_STAGES = [
+  {
+    number: "01",
+    title: "Acquire and gate",
+    input: "Portable fundus-camera frame",
+    method: "Laplacian focus, illumination-grid, field-of-view and fill-ratio checks. Borderline frames are rescued with CLAHE, normalization and denoising; ungradeable frames get recapture feedback.",
+    output: "Accepted, enhanced or rejected image",
+    tool: "MATLAB Image Processing Toolbox · module1_quality_gate.m",
+    icon: Camera,
+    tone: "#22D3EE",
+  },
+  {
+    number: "02",
+    title: "Extract clinical evidence",
+    input: "Quality-approved retina",
+    method: "Vessel segmentation plus optic-disc and fovea localization. Multi-scale filters and adaptive lesion thresholds surface microaneurysms, hemorrhages, exudates and neovascularisation, including DME risk near the fovea.",
+    output: "Lesion counts, masks, landmarks and evidence features",
+    tool: "Computer Vision Toolbox · Medical Imaging Toolbox · module2_evidence_engine.m",
+    icon: Microscope,
+    tone: "#34D399",
+  },
+  {
+    number: "03",
+    title: "Grade on ICDR 0–4",
+    input: "Image plus structured evidence",
+    method: "A class-balanced ResNet transfer-learning model produces calibrated probabilities for No DR, Mild, Moderate, Severe and Proliferative DR. Level 2+ is the referable threshold.",
+    output: "Five-class grade and confidence",
+    tool: "Deep Learning Toolbox · module3_train_resnet.m",
+    icon: BrainCircuit,
+    tone: "#FBBF24",
+  },
+  {
+    number: "04",
+    title: "Explain and challenge",
+    input: "Grade, lesions and model activations",
+    method: "Grad-CAM highlights the regions supporting the grade. Independent image-half masks are compared using centroid distance, region overlap and evidence agreement; unstable explanations lower trust.",
+    output: "Annotated evidence report and consistency score",
+    tool: "Deep Learning Toolbox · Statistics and Machine Learning Toolbox · module4_explainability.m",
+    icon: ScanSearch,
+    tone: "#FB923C",
+  },
+  {
+    number: "05",
+    title: "Route at district scale",
+    input: "Trust score, severity and DME flag",
+    method: "HIGH cases can auto-clear, MODERATE cases enter doctor review, and LOW or urgent cases jump the queue. SimEvents models cameras, reviewers, arrivals, service time, throughput and queue pressure.",
+    output: "Referral route, audit record and capacity decision",
+    tool: "Simulink + SimEvents · module5_build_simulink.m",
+    icon: Workflow,
+    tone: "#F87171",
+  },
+] as const;
+
+const TOOLBOXES = [
+  ["Image Processing Toolbox", "CLAHE, illumination normalization, denoising and quality measurements", FlaskConical],
+  ["Computer Vision Toolbox", "Fundus geometry, vessel masks and lesion morphology", Network],
+  ["Deep Learning Toolbox", "ResNet training, inference and Grad-CAM activations", BrainCircuit],
+  ["Medical Imaging Toolbox", "Clinical image handling, landmarks and annotations", Microscope],
+  ["Statistics and Machine Learning Toolbox", "Calibration, threshold policy and validation metrics", Scale],
+  ["Simulink + SimEvents", "Acquisition, bandwidth, service capacity and district queues", Workflow],
+] as const;
+
+const DATASETS = [
+  ["APTOS 2019", "Primary DR grading benchmark and the 550-image held-out validation view"],
+  ["IDRiD", "Indian lesion-level annotations for evidence and DME-focused evaluation"],
+  ["DRIVE", "Vessel extraction benchmark for retinal-structure segmentation"],
+  ["Messidor-2", "External robustness check across a separate clinical image source"],
+] as const;
 
 /* ────────────────────────────────────────────────────────────
    Module frame — scroll-driven "lights up" card
@@ -145,7 +219,7 @@ function ModuleRail({ active, onSelect }: { active: number; onSelect: (n: number
                   "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-300 ease-out",
                   on
                     ? "bg-[#22D3EE]/[0.07] text-[#22D3EE]"
-                    : "text-muted-foreground hover:bg-white/[0.03] hover:text-foreground"
+                    : "text-muted-foreground hover:bg-white/3 hover:text-foreground"
                 )}
               >
                 <span className={cn("tabular font-display text-xs", on ? "text-[#22D3EE]" : "text-muted-foreground/60")}>
@@ -184,7 +258,7 @@ function TrustGateDemo() {
 
   return (
     <div className="grid items-center gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
-      <RetinaView severity={0} blur={(blur / 100) * 0.9} className="mx-auto aspect-square w-full max-w-[220px] md:mx-0" />
+      <RetinaView severity={0} blur={(blur / 100) * 0.9} className="mx-auto aspect-square w-full max-w-55 md:mx-0" />
       <div className="min-w-0 space-y-5">
         <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
           <ScoreDial value={quality} size={128} label="Quality" sublabel="trust gate" tone="auto" />
@@ -248,7 +322,7 @@ function EvidenceDemo() {
         severity={3}
         dmeRisk={false}
         layers={{ ...layers, gradcam: false }}
-        className="mx-auto aspect-square w-full max-w-[240px] md:mx-0"
+        className="mx-auto aspect-square w-full max-w-60 md:mx-0"
       />
       <div className="min-w-0 space-y-4">
         <div className="flex flex-wrap gap-2">
@@ -262,7 +336,7 @@ function EvidenceDemo() {
                 onClick={() => setLayers((p) => ({ ...p, [l.key]: !p[l.key] }))}
                 className={cn(
                   "chip cursor-pointer transition-all duration-300 ease-out",
-                  on ? "bg-white/[0.04]" : "border-white/10 text-muted-foreground opacity-55 hover:opacity-80"
+                  on ? "bg-white/4" : "border-white/10 text-muted-foreground opacity-55 hover:opacity-80"
                 )}
                 style={on ? { borderColor: `${l.color}66`, color: l.color } : undefined}
               >
@@ -331,7 +405,7 @@ function GradingDemo() {
               onClick={() => setSel(c.level)}
               className={cn(
                 "cursor-pointer rounded-lg border px-3 py-2 text-xs font-semibold transition-all duration-300 ease-out",
-                on ? "bg-white/[0.04]" : "border-white/10 text-muted-foreground hover:border-white/25 hover:text-foreground"
+                on ? "bg-white/4" : "border-white/10 text-muted-foreground hover:border-white/25 hover:text-foreground"
               )}
               style={on ? { borderColor: `${c.color}88`, color: c.color, boxShadow: `0 0 14px ${c.color}33` } : undefined}
             >
@@ -368,7 +442,7 @@ function GradcamDemo() {
 
   return (
     <div className="grid items-center gap-6 md:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-      <div className="relative mx-auto aspect-square w-full max-w-[280px] md:mx-0">
+      <div className="relative mx-auto aspect-square w-full max-w-70 md:mx-0">
         <RetinaView
           severity={3}
           dmeRisk
@@ -491,13 +565,13 @@ function RoutingDemo() {
         <div className="absolute left-[55%] right-[36%] top-[84%] border-t border-dashed border-[#22D3EE]/10" />
 
         {/* capture */}
-        <div className="absolute left-0 top-1/2 flex h-16 w-16 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] sm:h-20 sm:w-20">
+        <div className="absolute left-0 top-1/2 flex h-16 w-16 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/3 sm:h-20 sm:w-20">
           <Camera className="h-4 w-4 text-muted-foreground" />
           <span className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Capture</span>
         </div>
 
         {/* pipeline */}
-        <div className="absolute left-[20%] top-1/2 flex h-20 w-24 -translate-y-1/2 flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border border-[#22D3EE]/40 bg-[#22D3EE]/[0.06] shadow-[0_0_18px_rgba(34,211,238,0.15)] sm:w-28">
+        <div className="absolute left-[20%] top-1/2 flex h-20 w-24 -translate-y-1/2 flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border border-[#22D3EE]/40 bg-[#22D3EE]/6 shadow-[0_0_18px_rgba(34,211,238,0.15)] sm:w-28">
           <span className="scanline" />
           <Cpu className="h-4 w-4 text-[#22D3EE]" />
           <span className="text-[9px] font-semibold uppercase tracking-widest text-[#22D3EE]">DRISHTI</span>
@@ -505,18 +579,18 @@ function RoutingDemo() {
         </div>
 
         {/* outcomes */}
-        <div className="absolute right-0 flex w-28 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#34D399]/35 bg-[#34D399]/[0.05] sm:w-36" style={{ top: "4%", height: "24%" }}>
+        <div className="absolute right-0 flex w-28 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#34D399]/35 bg-[#34D399]/5 sm:w-36" style={{ top: "4%", height: "24%" }}>
           <span className="text-[10px] font-semibold text-[#34D399]">Auto-cleared</span>
           <span className="text-[8px] uppercase tracking-widest text-muted-foreground">trust HIGH</span>
         </div>
-        <div className="absolute right-0 flex w-28 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#FBBF24]/35 bg-[#FBBF24]/[0.05] sm:w-36" style={{ top: "35%", height: "30%" }}>
+        <div className="absolute right-0 flex w-28 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#FBBF24]/35 bg-[#FBBF24]/5 sm:w-36" style={{ top: "35%", height: "30%" }}>
           <span className="absolute -left-2.5 -top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-[#FBBF24]/60 bg-[#2A2210] text-[11px] font-bold tabular text-[#FBBF24] shadow-[0_0_10px_rgba(251,191,36,0.35)]">
             2
           </span>
           <span className="text-[10px] font-semibold text-[#FBBF24]">Doctor review</span>
           <span className="text-[8px] uppercase tracking-widest text-muted-foreground">trust MODERATE</span>
         </div>
-        <div className="absolute right-0 flex w-28 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#F87171]/35 bg-[#F87171]/[0.05] sm:w-36" style={{ bottom: "4%", height: "24%" }}>
+        <div className="absolute right-0 flex w-28 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#F87171]/35 bg-[#F87171]/5 sm:w-36" style={{ bottom: "4%", height: "24%" }}>
           <span className="text-[10px] font-semibold text-[#F87171]">Urgent referral</span>
           <span className="text-[8px] uppercase tracking-widest text-muted-foreground">jumps the queue</span>
         </div>
@@ -539,6 +613,131 @@ function RoutingDemo() {
         routes. The capacity planner sizes camps so the review lane never floods.
       </p>
     </div>
+  );
+}
+
+function ImplementationSection() {
+  const { navigate } = useNav();
+
+  return (
+    <Reveal className="mt-20 sm:mt-28">
+      <SectionHeading
+        eyebrow="PS 26038 IMPLEMENTATION"
+        title="From camera frame to accountable referral."
+        sub="The interactive cards above show the decision logic. This is the portable Python and MATLAB/Simulink implementation behind it."
+      />
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {IMPLEMENTATION_STAGES.map((stage) => {
+          const Icon = stage.icon;
+          return (
+            <GlassCard key={stage.number} className="p-5 sm:p-6">
+              <div className="flex items-start gap-4">
+                <span
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border"
+                  style={{ color: stage.tone, borderColor: `${stage.tone}55`, backgroundColor: `${stage.tone}12` }}
+                >
+                  <Icon className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="tabular font-display text-xs font-semibold" style={{ color: stage.tone }}>
+                      {stage.number}
+                    </span>
+                    <h3 className="font-display text-lg font-bold">{stage.title}</h3>
+                  </div>
+                  <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{stage.method}</p>
+                  <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
+                    <p className="rounded-lg border border-white/10 bg-white/2 p-3">
+                      <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Input</span>
+                      <span className="mt-1 block text-foreground/90">{stage.input}</span>
+                    </p>
+                    <p className="rounded-lg border border-white/10 bg-white/2 p-3">
+                      <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Output</span>
+                      <span className="mt-1 block text-foreground/90">{stage.output}</span>
+                    </p>
+                  </div>
+                  <p className="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-muted-foreground">
+                    <FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: stage.tone }} />
+                    {stage.tool}
+                  </p>
+                </div>
+              </div>
+            </GlassCard>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <GlassCard className="p-6 sm:p-7">
+          <div className="flex items-center gap-3">
+            <Database className="h-5 w-5 text-[#22D3EE]" />
+            <h3 className="font-display text-xl font-bold">Datasets and validation path</h3>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {DATASETS.map(([name, use]) => (
+              <div key={name} className="border-l-2 border-[#22D3EE]/35 pl-3">
+                <p className="font-display text-sm font-semibold text-[#22D3EE]">{name}</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{use}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-5 text-xs leading-relaxed text-muted-foreground">
+            Current MATLAB validation: <span className="text-foreground">87.0% sensitivity · 94.5% specificity · QWK 0.8766</span> on 550 held-out APTOS images. These figures describe the research prototype, not a certified clinical device.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate("validation")}
+            className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-lg border border-[#22D3EE]/30 px-4 py-2 text-sm font-semibold text-[#22D3EE] transition-colors hover:bg-[#22D3EE]/10"
+          >
+            Inspect validation evidence
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </GlassCard>
+
+        <GlassCard className="p-6 sm:p-7">
+          <div className="flex items-center gap-3">
+            <Workflow className="h-5 w-5 text-[#FBBF24]" />
+            <h3 className="font-display text-xl font-bold">Simulink deployment twin</h3>
+          </div>
+          <div className="mt-5 space-y-3 text-xs leading-relaxed text-muted-foreground">
+            <p className="border-l-2 border-[#FBBF24]/50 pl-3">Camera acquisition → bandwidth-aware transfer → quality gate → AI service → doctor review.</p>
+            <p className="border-l-2 border-[#FBBF24]/50 pl-3">The SimEvents model varies cameras, reviewers, arrivals per hour and service time to expose queue overload before a district rollout.</p>
+            <p className="border-l-2 border-[#34D399]/50 pl-3">The live planner below is the browser-side capacity twin; `module5_build_simulink.m` builds the MathWorks model for simulation.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate("capacity")}
+            className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-lg border border-[#FBBF24]/30 px-4 py-2 text-sm font-semibold text-[#FBBF24] transition-colors hover:bg-[#FBBF24]/10"
+          >
+            Open capacity planner
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </GlassCard>
+      </div>
+
+      <GlassCard className="mt-4 p-6 sm:p-7">
+        <div className="flex items-center gap-3">
+          <Cpu className="h-5 w-5 text-[#22D3EE]" />
+          <h3 className="font-display text-xl font-bold">Toolbox map</h3>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {TOOLBOXES.map(([name, role, Icon]) => (
+            <div key={name} className="flex gap-3 rounded-lg border border-white/10 bg-white/2 p-3">
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[#22D3EE]" />
+              <div>
+                <p className="text-xs font-semibold text-foreground/90">{name}</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{role}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-5 flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#34D399]" />
+          The web console is the judge-facing interface. FastAPI selects MATLAB Engine when connected, otherwise the portable Python pipeline, then an offline demo fallback. The active engine is reported by `GET /api/matlab_status`.
+        </p>
+      </GlassCard>
+    </Reveal>
   );
 }
 
@@ -689,6 +888,7 @@ export default function HowView() {
         </div>
       </div>
 
+      <ImplementationSection />
       <ConsistencySection />
       <LaunchCta />
     </section>

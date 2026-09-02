@@ -378,8 +378,8 @@ const BANNER_STATS = [
     value: VALIDATED_METRICS.runs.length,
     decimals: 0,
     suffix: "",
-    label: "Stable training runs",
-    sub: `Seeds ${VALIDATED_METRICS.runs.map((r) => r.seed).join(" · ")}`,
+    label: "MATLAB validation run",
+    sub: "ResNet-101 · held-out confusion matrix",
   },
 ];
 

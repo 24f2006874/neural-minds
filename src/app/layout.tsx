@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   icons: { icon: "/logo.svg", apple: "/icons/apple-touch-icon.png" },
   openGraph: {
     title: "DRISHTI — AI that knows when to trust itself",
-    description: "Trust-gated DR screening. 92.8% sensitivity · 94.5% specificity · QWK 0.899.",
+    description: "Trust-gated DR screening. 87.0% sensitivity · 94.5% specificity · QWK 0.8766.",
     siteName: "DRISHTI",
     type: "website",
   },
