@@ -52,3 +52,24 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Local runtime data: may contain uploaded clinical images or patient records.
+/backend/uploads/
+/backend/reports/
+/backend/patients.db
+/prisma/*.db
+
+# Generated Python and screening artifacts.
+**/__pycache__/
+*.py[cod]
+/DRISHTI_portable/results/*_report.png
+/DRISHTI_portable/results/*_pipeline.png
+/DRISHTI_portable/results/*_evidence.png
+/tool-results/
+/.zscripts/dev.pid
+
+# Large model/release binaries. Host these with Git LFS or a release asset,
+# and document a download link instead of committing them to normal Git.
+*.onnx
+*.pt
+*.zip

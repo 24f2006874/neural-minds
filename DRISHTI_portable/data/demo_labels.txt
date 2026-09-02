@@ -1,0 +1,16 @@
+im0032.png	normal
+im0076.png	normal
+im0081.png	normal
+im0082.png	normal
+im0030.png	normal
+im0080.png	normal
+im0001.png	BDR
+im0009.png	BDR
+im0013.png	BDR
+im0050.png	BDR
+im0116.png	BDR
+im0139.png	BDR
+im0085.png	PDR
+im0341.png	PDR
+im0345.png	PDR
+im0203.png	PDR
