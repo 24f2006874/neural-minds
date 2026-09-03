@@ -1,0 +1,12 @@
+.git
+.next
+node_modules
+backend/uploads
+backend/reports
+backend/*.db
+prisma/*.db
+**/__pycache__
+DRISHTI_portable/data
+DRISHTI_portable/results
+DRISHTI_portable/kaggle
+*.zip
