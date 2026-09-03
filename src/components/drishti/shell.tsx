@@ -100,24 +100,7 @@ export function NavProvider({ children }: { children: (view: ViewKey) => ReactNo
 
 export function DrishtiMark({ size = 30 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none" aria-hidden="true">
-      <defs>
-        <radialGradient id="dm-iris" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#22D3EE" />
-          <stop offset="70%" stopColor="#0E7490" />
-          <stop offset="100%" stopColor="#083344" />
-        </radialGradient>
-      </defs>
-      <path
-        d="M2 20 C10 8, 30 8, 38 20 C30 32, 10 32, 2 20 Z"
-        stroke="#22D3EE"
-        strokeWidth="2"
-        fill="rgba(34,211,238,0.06)"
-      />
-      <circle cx="20" cy="20" r="8.5" fill="url(#dm-iris)" />
-      <circle cx="20" cy="20" r="3.4" fill="#04121c" />
-      <circle cx="22.5" cy="17.5" r="1.3" fill="#A5F3FC" />
-    </svg>
+    <img src="/drishti-icon.svg" width={size} height={size} alt="" aria-hidden="true" />
   );
 }
 
@@ -136,8 +119,7 @@ function Header() {
           className="flex items-center gap-2.5 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
           aria-label="DRISHTI home"
         >
-          <DrishtiMark />
-          <span className="font-display text-lg font-bold tracking-[0.18em] text-foreground">DRISHTI</span>
+          <img src="/drishti-logo.svg" width={138} height={36} alt="DRISHTI" className="h-9 w-auto" />
           <span className="chip ml-1 hidden border-[#22D3EE]/30 text-[10px] text-[#22D3EE] md:inline-flex">SIH 2026 · PS 26038</span>
         </button>
 
