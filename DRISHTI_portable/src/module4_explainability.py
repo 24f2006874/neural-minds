@@ -28,21 +28,26 @@ import os
 import sys
 import cv2
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torchvision.models as models
-import torchvision.transforms as T
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    import torchvision.models as models
+    import torchvision.transforms as T
+except ImportError:  # Render Free uses the lightweight ONNX path.
+    torch = None
+    nn = F = models = T = None
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE, "models", "drishti_dr_model.pt")
 ONNX_MODEL_PATH = os.path.join(BASE, "models", "drishti_dr_model.onnx")
 APTOS_MODEL_PATH = os.path.join(BASE, "models", "drishti_aptos_resnet50.pt")
-DEVICE = torch.device("cpu")
+DEVICE = torch.device("cpu") if torch is not None else None
 
 # Same normalisation used during training
-TF = T.Compose([T.ToPILImage(), T.ToTensor(),
-                T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+TF = (T.Compose([T.ToPILImage(), T.ToTensor(),
+                 T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+      if T is not None else None)
 
 
 # --------------------------------------------------------------------------
@@ -315,8 +320,9 @@ def explain(img_bgr, evidence, quality_score, verbose=True):
     Returns the complete explainability package:
       prediction, probabilities, gradcam heatmap, consistency, trust.
     """
-    aptos_prediction = predict_aptos(img_bgr)
-    onnx_prediction = predict_onnx(img_bgr) if aptos_prediction is None else None
+    # Prefer ONNX so the API can run within small CPU/memory instances.
+    onnx_prediction = predict_onnx(img_bgr)
+    aptos_prediction = predict_aptos(img_bgr) if onnx_prediction is None else None
     if aptos_prediction is not None or onnx_prediction is not None:
         cls, probs = aptos_prediction or onnx_prediction
         classes = ["No DR (Level 0)", "Mild NPDR (Level 1)",

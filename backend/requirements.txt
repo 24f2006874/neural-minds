@@ -1,11 +1,9 @@
 fastapi
 uvicorn[standard]
 python-multipart
-torch
 opencv-python
 numpy
 onnxruntime
 scipy
 scikit-image
 matplotlib
-torchvision
