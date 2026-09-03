@@ -429,8 +429,10 @@ def health():
     onnx_model_path = PORTABLE / "models" / "drishti_dr_model.onnx"
     try:
         import module4_explainability as m4
-        m4.get_model()
-        model_ok = True
+        # The real five-class deployment prefers the APTOS ResNet checkpoint,
+        # then the MATLAB-exported ONNX model. Do not probe only the legacy
+        # three-class .pt model here.
+        model_ok = bool(m4.get_aptos_model() is not None or m4.get_onnx_session() is not None)
     except Exception:
         pass
     mat = None
