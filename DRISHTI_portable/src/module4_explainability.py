@@ -74,6 +74,8 @@ def crop_fundus(img_bgr):
 def get_aptos_model():
     """Load the validated APTOS five-class checkpoint once, when present."""
     global _aptos_model
+    if torch is None or models is None:
+        return None
     if _aptos_model is None and os.path.exists(APTOS_MODEL_PATH):
         try:
             model = models.resnet50(weights=None)
@@ -90,6 +92,8 @@ def get_aptos_model():
 
 def predict_aptos(img_bgr):
     """Run the APTOS-trained five-class ResNet with its evaluated preprocessing."""
+    if torch is None or models is None:
+        return None
     model = get_aptos_model()
     if model is None:
         return None
