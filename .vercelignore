@@ -1,0 +1,12 @@
+# Vercel deploys only the Next.js frontend. ML models are used by the separate
+# FastAPI service on Render and are intentionally excluded from this build.
+DRISHTI_portable/models/
+model_and_result/*.mat
+DRISHTI_portable/kaggle/
+DRISHTI_portable/data/
+DRISHTI_portable/results/
+backend/
+tests/
+examples/
+worklog.md
+DRISHTI_portable.zip
