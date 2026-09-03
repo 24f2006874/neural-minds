@@ -7,7 +7,7 @@
  *    production build network still wins and the cache covers offline)
  *  - /api/* GET: network-first (4s timeout) → cache → JSON 503
  * Never caches non-GET, non-200, opaque or cross-origin responses. */
-const VERSION = "v9";
+const VERSION = "v10";
 const PRECACHE = `drishti-${VERSION}`;
 const RUNTIME = `drishti-runtime-${VERSION}`;
 const RUNTIME_MAX = 60;
@@ -21,6 +21,8 @@ const PRECACHE_URLS = [
   "/icons/icon-512-maskable.png",
   "/icons/apple-touch-icon.png",
   "/logo.svg",
+  "/drishti-logo.svg?v=2",
+  "/drishti-icon.svg?v=2",
 ];
 
 self.addEventListener("install", (event) => {

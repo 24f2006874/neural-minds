@@ -100,7 +100,7 @@ export function NavProvider({ children }: { children: (view: ViewKey) => ReactNo
 
 export function DrishtiMark({ size = 30 }: { size?: number }) {
   return (
-    <img src="/drishti-icon.svg" width={size} height={size} alt="" aria-hidden="true" />
+    <img src="/drishti-icon.svg?v=2" width={size} height={size} alt="" aria-hidden="true" />
   );
 }
 
@@ -119,7 +119,7 @@ function Header() {
           className="flex items-center gap-2.5 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
           aria-label="DRISHTI home"
         >
-          <img src="/drishti-logo.svg" width={138} height={36} alt="DRISHTI" className="h-9 w-auto" />
+          <img src="/drishti-logo.svg?v=2" width={138} height={36} alt="DRISHTI" className="h-9 w-auto" />
           <span className="chip ml-1 hidden border-[#22D3EE]/30 text-[10px] text-[#22D3EE] md:inline-flex">SIH 2026 · PS 26038</span>
         </button>
 

@@ -24,7 +24,7 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "DRISHTI",
   },
-  icons: { icon: "/drishti-icon.svg", apple: "/icons/apple-touch-icon.png" },
+  icons: { icon: "/drishti-icon.svg?v=2", apple: "/icons/apple-touch-icon.png" },
   openGraph: {
     title: "DRISHTI — AI that knows when to trust itself",
     description: "Trust-gated DR screening. 87.0% sensitivity · 94.5% specificity · QWK 0.8766.",
