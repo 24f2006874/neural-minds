@@ -25,7 +25,7 @@ const DICT: Record<string, { en: string; hi: string }> = {
   "nav.about": { en: "About", hi: "परिचय" },
   "nav.launch": { en: "Launch Screening", hi: "स्क्रीनिंग शुरू करें" },
   "nav.menu": { en: "Toggle navigation menu", hi: "नेविगेशन मेनू खोलें/बंद करें" },
-  "footer.demoChip": { en: "Demo data is simulated", hi: "डेमो डेटा — केवल नमूना" },
+  "footer.demoChip": { en: "Live screening register", hi: "लाइव स्क्रीनिंग रजिस्टर" },
 
   // ── trust chips (trust color language) ──────────────────────
   "trust.HIGH": { en: "TRUSTED", hi: "भरोसेमंद" },
@@ -46,7 +46,7 @@ const DICT: Record<string, { en: string; hi: string }> = {
     en: "HIGH-trust cases auto-clear. MODERATE cases wait for your sign-off. Urgent and DME cases jump the queue.",
     hi: "उच्च-भरोसा वाले केस स्वतः स्वीकृत होते हैं। मध्यम केस आपके साइन-ऑफ़ की प्रतीक्षा करते हैं। अत्यावश्यक और DME केस पंक्ति में सबसे आगे।",
   },
-  "dash.demoChip": { en: "Demo data — simulated screening records", hi: "डेमो डेटा — नमूना जांच रिकॉर्ड" },
+  "dash.demoChip": { en: "Live screening records", hi: "लाइव स्क्रीनिंग रिकॉर्ड" },
   "dash.stats.screened": { en: "Screened today", hi: "आज जांचे गए" },
   "dash.stats.screenedSub": { en: "cases through the DRISHTI pipeline today", hi: "केस आज DRISHTI पाइपलाइन से गुज़रे" },
   "dash.stats.referable": { en: "Referable caught", hi: "रेफरयोग्य पकड़े गए" },
@@ -223,6 +223,14 @@ const DICT: Record<string, { en: string; hi: string }> = {
     hi: "गुणवत्ता गेट ने पाइपलाइन रोक दी — कोई AI ग्रेड नहीं बना।",
   },
   "screen.haltedTitle": { en: "Quality gate halted the pipeline", hi: "गुणवत्ता गेट ने पाइपलाइन रोक दी" },
+  "screen.notFundus.title": {
+    en: "That doesn't look like a fundus photograph",
+    hi: "यह फंडस फोटो नहीं लग रहा",
+  },
+  "screen.notFundus.hint": {
+    en: "The image was rejected before the AI could grade it — please upload a clear retinal photograph.",
+    hi: "AI ग्रेडिंग से पहले ही छवि अस्वीकृत कर दी गई — कृपया एक साफ़ रेटिना फोटो अपलोड करें।",
+  },
   "screen.live": { en: "LIVE", hi: "सजीव" },
   "screen.start": { en: "Start screening", hi: "जांच शुरू करें" },
   "screen.running": { en: "Running…", hi: "चल रहा है…" },
