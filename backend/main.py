@@ -429,6 +429,7 @@ def capacity(
 @app.get("/health")
 def health():
     model_ok = False
+    model_error = None
     model_path = PORTABLE / "models" / "drishti_dr_model.pt"
     onnx_model_path = PORTABLE / "models" / "drishti_dr_model.onnx"
     try:
@@ -437,6 +438,11 @@ def health():
         # then the MATLAB-exported ONNX model. Do not probe only the legacy
         # three-class .pt model here.
         model_ok = bool(m4.get_aptos_model() is not None or m4.get_onnx_session() is not None)
+    except Exception:
+        model_error = f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+    try:
+        import module4_explainability as m4
+        model_error = model_error or m4.get_onnx_error()
     except Exception:
         pass
     mat = None
@@ -454,6 +460,7 @@ def health():
         "pipeline": PIPELINE_AVAILABLE,
         "pipeline_error": PIPELINE_ERROR,
         "model_loaded": model_ok,
+        "model_error": model_error,
         "model_exists": model_path.exists(),
         "onnx_model_exists": onnx_model_path.exists(),
         "model_engine": "onnx" if onnx_model_path.exists() else "pytorch",

@@ -55,6 +55,7 @@ TF = (T.Compose([T.ToPILImage(), T.ToTensor(),
 # --------------------------------------------------------------------------
 _model = None
 _onnx_session = None
+_onnx_error = None
 _aptos_model = None
 
 
@@ -111,7 +112,7 @@ def predict_aptos(img_bgr):
 
 def get_onnx_session():
     """Load the MATLAB-exported ONNX model once when ONNX Runtime is present."""
-    global _onnx_session
+    global _onnx_session, _onnx_error
     if _onnx_session is None and os.path.exists(ONNX_MODEL_PATH):
         try:
             import onnxruntime as ort
@@ -119,8 +120,13 @@ def get_onnx_session():
                 ONNX_MODEL_PATH, providers=["CPUExecutionProvider"]
             )
         except Exception as exc:
-            print(f"[drishti] ONNX model unavailable: {exc}", file=sys.stderr)
+            _onnx_error = f"{type(exc).__name__}: {exc}"
+            print(f"[drishti] ONNX model unavailable: {_onnx_error}", file=sys.stderr)
     return _onnx_session
+
+
+def get_onnx_error():
+    return _onnx_error
 
 
 def predict_onnx(img_bgr):
