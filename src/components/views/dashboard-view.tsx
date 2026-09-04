@@ -1110,8 +1110,8 @@ export default function DashboardView() {
 
       {/* 2 ── Filter tabs + search + register export */}
       <Reveal delay={0.1} className="mt-8 print:hidden">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
+        <div className="flex flex-col gap-3">
+          <div className="order-2 drishti-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Queue filters">
           {FILTER_TABS.map((tab) => {
             const active = filter === tab.key;
             const label =
@@ -1168,7 +1168,7 @@ export default function DashboardView() {
             );
           })}
           </div>
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="order-1 flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
             {/* reviewing doctor identity — recorded as the signer on every sign-off */}
             <Select
               value={doctor}
@@ -1184,7 +1184,7 @@ export default function DashboardView() {
               <SelectTrigger
                 aria-label={t("dash.doctor.label")}
                 title={t("dash.doctor.title")}
-                className="h-11 w-full gap-2 rounded-lg border-white/15 bg-white/[0.03] text-sm text-foreground transition-colors hover:border-[#22D3EE]/40 focus-visible:border-[#22D3EE]/50 focus-visible:ring-[#22D3EE]/25 data-[state=open]:border-[#22D3EE]/50 sm:w-[15.5rem]"
+                className="h-11 w-full gap-2 rounded-lg border-white/15 bg-white/[0.03] text-sm text-foreground transition-colors hover:border-[#22D3EE]/40 focus-visible:border-[#22D3EE]/50 focus-visible:ring-[#22D3EE]/25 data-[state=open]:border-[#22D3EE]/50"
               >
                 <Stethoscope className="h-4 w-4 shrink-0 text-[#22D3EE]" aria-hidden="true" />
                 <SelectValue />
