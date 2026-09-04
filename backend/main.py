@@ -133,8 +133,8 @@ def run_pipeline(image_path: str, patient_id: str) -> dict:
         except Exception as e:
             print(f"[drishti] pipeline error, using mock: {e}", file=sys.stderr)
 
-    # 3) Offline mock (same shape, keeps the site usable without any deps)
-    return mock_result(patient_id, image_path)
+    # Never report fabricated clinical results for an uploaded image.
+    raise RuntimeError("Real screening model is unavailable on this deployment")
 
 
 def adapt_result(raw: dict, patient_id: str, image_path: str) -> dict:

@@ -128,8 +128,15 @@ def predict_onnx(img_bgr):
     session = get_onnx_session()
     if session is None:
         return None
-    from train_model import letterbox
-    resized = cv2.resize(letterbox(img_bgr), (224, 224), interpolation=cv2.INTER_AREA)
+    # Keep inference independent of train_model.py (and PyTorch). Railway uses
+    # the lightweight ONNX runtime image, not the training environment.
+    h, w = img_bgr.shape[:2]
+    scale = 224 / max(h, w)
+    resized_small = cv2.resize(img_bgr, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
+    resized = np.zeros((224, 224, 3), dtype=np.uint8)
+    top = (224 - resized_small.shape[0]) // 2
+    left = (224 - resized_small.shape[1]) // 2
+    resized[top:top + resized_small.shape[0], left:left + resized_small.shape[1]] = resized_small
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
     image = rgb.astype(np.float32) / 255.0
     image = (image - np.array([0.485, 0.456, 0.406], dtype=np.float32)) / np.array(
