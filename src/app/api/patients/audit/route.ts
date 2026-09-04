@@ -21,20 +21,22 @@ export async function GET(req: Request) {
   const limitRaw = Number(url.searchParams.get("limit") ?? 40);
   const limit = Number.isFinite(limitRaw) ? Math.min(100, Math.max(1, Math.floor(limitRaw))) : 40;
 
-  const rows = await db.screening.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 200,
-    select: {
-      patientId: true,
-      status: true,
-      trustLevel: true,
-      predictedClass: true,
-      details: true,
-      reviewedBy: true,
-      reviewedAt: true,
-      reviewNote: true,
-    },
-  });
+  let rows;
+  try {
+    rows = await db.screening.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: {
+        patientId: true, status: true, trustLevel: true, predictedClass: true,
+        details: true, reviewedBy: true, reviewedAt: true, reviewNote: true,
+      },
+    });
+  } catch {
+    // The production register is stored by the Railway backend. Vercel may
+    // not have a writable Prisma/SQLite database, so an empty activity feed
+    // is preferable to returning a 500 response.
+    return NextResponse.json({ count: 0, events: [] });
+  }
 
   type AuditEvent = {
     patient_id: string;
