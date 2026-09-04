@@ -11,7 +11,7 @@
  *
  * Signals are split into two tiers:
  *   - HARD (any failure → reject): aspect ratio, resolution, decode
- *   - SOFT (allow up to 1 failure): warm center, reddish coverage,
+ *   - SOFT (warnings only): warm center, reddish coverage,
  *     luminance variance, edge density
  *
  * Blur (Laplacian variance) is recorded but never causes rejection — the
@@ -24,7 +24,6 @@
 
 const ANALYSIS_SIZE = 128;
 const CENTER_CROP_FRAC = 0.5;
-const SOFT_MAX_FAILURES = 1;
 
 const THRESHOLDS = {
   aspectMin: 0.85,
@@ -136,10 +135,12 @@ export async function looksLikeFundus(file: File): Promise<FundusCheckResult> {
   bitmap.close?.();
 
   const hardOk = hardReasons.length === 0;
-  const softFailures = softTotal - softPassed;
-  const accepted = hardOk && softFailures <= SOFT_MAX_FAILURES;
-  const reasons = accepted ? [] : dedupe([...hardReasons, ...softReasons]);
-  const notes = blurNote ? [blurNote] : [];
+  // Camera lighting, pigmentation, crop and exposure vary widely. Soft
+  // signals must not block a plausible fundus image; the backend quality gate
+  // and model are responsible for the clinical decision.
+  const accepted = hardOk;
+  const reasons = accepted ? [] : dedupe(hardReasons);
+  const notes = dedupe([...softReasons, ...(blurNote ? [blurNote] : [])]);
   const score = softPassed / softTotal;
   return { accepted, reasons, notes, score };
 }
