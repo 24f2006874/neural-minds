@@ -385,12 +385,21 @@ export default function ScreeningView() {
     setRunNonce((n) => n + 1);
     try {
       let res: Response;
+      let usedBackend = false;
       if (f) {
         const fd = new FormData();
         fd.append("patient_id", id);
         fd.append("file", f);
         const target = backendUrl();
-        res = await fetch(`${target}/api/screen`, { method: "POST", body: fd });
+        // Prefer the real FastAPI pipeline when it is running, but keep uploads
+        // usable in the web-only/demo setup when :8000 is unavailable.
+        try {
+          res = await fetch(`${target}/api/screen`, { method: "POST", body: fd });
+          if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+          usedBackend = true;
+        } catch {
+          res = await fetch("/api/screen", { method: "POST", body: fd });
+        }
       } else {
         res = await fetch("/api/screen", {
           method: "POST",
@@ -399,7 +408,7 @@ export default function ScreeningView() {
         });
       }
       const payload: unknown = await res.json().catch(() => null);
-      const data = payload && backendUrl() && f
+      const data = payload && usedBackend
         ? normalizeBackendResult(payload as Record<string, unknown>)
         : payload as ScreeningResult | null;
       if (!res.ok || !data || !data.timings_ms) {
