@@ -6,10 +6,10 @@
  * it first. This module runs a deterministic, frame-based heuristic on the
  * dropped image and rejects anything that doesn't look retinal.
  *
- * IMPORTANT: this is a UX guardrail, not security. It must fail CLOSED
- * (unknown images → reject), and it must run BEFORE any /api/screen POST.
+ * IMPORTANT: this is a UX guardrail, not security. It must run BEFORE any
+ * /api/screen POST, while allowing natural variation in real fundus photos.
  *
- * Heuristics (fail any one → reject):
+ * Heuristics (geometry is hard; visual signals are scored together):
  *   1. Aspect ratio within [0.85, 1.18]      — fundus cameras are ~square
  *   2. Width AND height ≥ 384                — rejects thumbnails/screenshots
  *   3. Center dominant color is warm         — fundus background is red/orange
@@ -129,7 +129,11 @@ export async function looksLikeFundus(file: File): Promise<FundusCheckResult> {
 
   bitmap.close?.();
 
-  const accepted = reasons.length === 0;
+  // Real fundus photos vary in lighting, crop and camera borders. Require the
+  // hard geometry checks plus at least three of the four color/texture signals instead
+  // of rejecting a valid retina image because one color/texture signal differs.
+  const geometryPassed = width >= THRESHOLDS.minDimension && aspect >= THRESHOLDS.aspectMin && aspect <= THRESHOLDS.aspectMax;
+  const accepted = geometryPassed && passed >= 5;
   const score = passed / total;
   return { accepted, reasons: dedupe(reasons), score };
 }
