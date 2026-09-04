@@ -25,10 +25,8 @@ import { StageStepper, type StageDef, type StageState } from "@/components/drish
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  DEMO_CASES,
   ICDR_CLASSES,
   PROB_LABELS,
-  TRUST_THRESHOLDS,
   type EvidenceResult,
   type ScreeningResult,
 } from "@/lib/drishti";
@@ -461,12 +459,6 @@ export default function ScreeningView() {
     }
   };
 
-  const runPreset = (id: string) => {
-    if (phase === "running") return;
-    setPatientId(id);
-    clearFile();
-    void startRun(id, null);
-  };
 
   const backToIdle = () => {
     stopClock();
@@ -664,6 +656,7 @@ export default function ScreeningView() {
                 />
               </div>
 
+              {false && (
               {/* demo cases */}
               <div className="space-y-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -696,6 +689,8 @@ export default function ScreeningView() {
                 </div>
               </div>
 
+              )}
+
               {/* start */}
               <Button
                 onClick={() => void startRun(patientId, file)}
@@ -715,11 +710,11 @@ export default function ScreeningView() {
                 )}
               </Button>
 
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {false && <p className="text-[11px] leading-relaxed text-muted-foreground">
                 Web demo simulates the on-device pipeline (torch CNN + Grad-CAM) end-to-end. Thresholds identical: HIGH ≥{" "}
                 {TRUST_THRESHOLDS.HIGH} · MODERATE {TRUST_THRESHOLDS.MODERATE_LOW}–{TRUST_THRESHOLDS.HIGH} · LOW &lt;{" "}
                 {TRUST_THRESHOLDS.MODERATE_LOW}. Demo only — not a medical device.
-              </p>
+              </p>}
 
               {/* recent runs — live from the screening register */}
               <div className="space-y-1.5 border-t border-white/8 pt-4">
