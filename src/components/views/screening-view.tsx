@@ -992,7 +992,7 @@ export default function ScreeningView() {
                     <p className="font-display text-xl font-bold tracking-wide">{result.patient_id}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {new Date(result.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} · DRISHTI
-                      web demo
+                      · Live screening
                     </p>
                   </div>
                   <StatusChip status={result.status} />
