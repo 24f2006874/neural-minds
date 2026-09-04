@@ -136,12 +136,13 @@ def predict_onnx(img_bgr):
         return None
     # Keep inference independent of train_model.py (and PyTorch). Railway uses
     # the lightweight ONNX runtime image, not the training environment.
+    input_size = 256
     h, w = img_bgr.shape[:2]
-    scale = 224 / max(h, w)
+    scale = input_size / max(h, w)
     resized_small = cv2.resize(img_bgr, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
-    resized = np.zeros((224, 224, 3), dtype=np.uint8)
-    top = (224 - resized_small.shape[0]) // 2
-    left = (224 - resized_small.shape[1]) // 2
+    resized = np.zeros((input_size, input_size, 3), dtype=np.uint8)
+    top = (input_size - resized_small.shape[0]) // 2
+    left = (input_size - resized_small.shape[1]) // 2
     resized[top:top + resized_small.shape[0], left:left + resized_small.shape[1]] = resized_small
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
     image = rgb.astype(np.float32) / 255.0
@@ -150,9 +151,11 @@ def predict_onnx(img_bgr):
     )
     image = np.transpose(image, (2, 0, 1))[None, ...]
     output = session.run(None, {session.get_inputs()[0].name: image})[0][0]
-    # The exported graph has a softmax output, but normalize defensively.
+    # The replacement model exports logits; convert them to real probabilities.
     probabilities = np.asarray(output, dtype=np.float32)
-    probabilities = probabilities / max(float(probabilities.sum()), 1e-8)
+    probabilities -= probabilities.max()
+    probabilities = np.exp(probabilities)
+    probabilities /= max(float(probabilities.sum()), 1e-8)
     return int(probabilities.argmax()), probabilities
 
 
