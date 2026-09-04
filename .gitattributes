@@ -1,3 +1,2 @@
 DRISHTI_portable/models/drishti_aptos_resnet50.pt filter=lfs diff=lfs merge=lfs -text
-DRISHTI_portable/models/drishti_dr_model.onnx filter=lfs diff=lfs merge=lfs -text
 model_and_result/drishti_dr_model.mat filter=lfs diff=lfs merge=lfs -text
