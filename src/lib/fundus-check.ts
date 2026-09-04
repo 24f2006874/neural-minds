@@ -11,7 +11,7 @@
  *
  * Heuristics (geometry is hard; visual signals are scored together):
  *   1. Aspect ratio within [0.85, 1.18]      — fundus cameras are ~square
- *   2. Width AND height ≥ 384                — rejects thumbnails/screenshots
+ *   2. Width AND height ≥ 256                — rejects very small thumbnails
  *   3. Center dominant color is warm         — fundus background is red/orange
  *   4. ≥55% center pixels are reddish        — skin/outdoor/portrait fail
  *   5. Luminance std-dev ≥ 18 in center      — flat screenshots fail
@@ -30,7 +30,7 @@ const CENTER_CROP_FRAC = 0.5;
 const THRESHOLDS = {
   aspectMin: 0.85,
   aspectMax: 1.18,
-  minDimension: 384,
+  minDimension: 256,
   centerWarmRMinusB: 20,
   centerWarmR: 70,
   reddishCoverage: 0.55,
