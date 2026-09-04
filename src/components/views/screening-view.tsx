@@ -656,7 +656,7 @@ export default function ScreeningView() {
                 />
               </div>
 
-              {false && (
+              <div className="hidden">
               {/* demo cases */}
               <div className="space-y-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -689,7 +689,7 @@ export default function ScreeningView() {
                 </div>
               </div>
 
-              )}
+              </div>
 
               {/* start */}
               <Button
