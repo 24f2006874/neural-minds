@@ -51,13 +51,17 @@ REPORTS_DIR.mkdir(exist_ok=True)
 
 # Whether the real pipeline is importable (i.e. deps installed + src present)
 PIPELINE_AVAILABLE = False
+PIPELINE_ERROR = None
 if SRC_DIR.exists():
     sys.path.insert(0, str(SRC_DIR))
     try:
         import pipeline  # noqa: E402  (the real orchestration module)
         PIPELINE_AVAILABLE = True
     except Exception as e:  # missing torch/opencv etc.
+        PIPELINE_ERROR = f"{type(e).__name__}: {e}"
         print(f"[drishti] real pipeline unavailable: {e}", file=sys.stderr)
+else:
+    PIPELINE_ERROR = f"Pipeline source directory not found: {SRC_DIR}"
 
 # MATLAB Engine bridge — the original MATLAB/Simulink pipeline (PS 26038 is a
 # MathWorks problem statement).  Used *first* when MATLAB is present; the web
@@ -448,6 +452,7 @@ def health():
     return {
         "status": "ok",
         "pipeline": PIPELINE_AVAILABLE,
+        "pipeline_error": PIPELINE_ERROR,
         "model_loaded": model_ok,
         "model_exists": model_path.exists(),
         "onnx_model_exists": onnx_model_path.exists(),
