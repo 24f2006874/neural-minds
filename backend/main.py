@@ -28,9 +28,11 @@ import time
 import uuid
 import sqlite3
 import re
+import cv2
+import numpy as np
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Form, Query
+from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -48,6 +50,8 @@ UPLOADS_DIR = HERE / "uploads"
 REPORTS_DIR = HERE / "reports"
 UPLOADS_DIR.mkdir(exist_ok=True)
 REPORTS_DIR.mkdir(exist_ok=True)
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+PATIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # Whether the real pipeline is importable (i.e. deps installed + src present)
 PIPELINE_AVAILABLE = False
@@ -289,10 +293,19 @@ async def screen(
     file: UploadFile = File(...),
     patient_id: str = Form("DEMO"),
 ):
-    ext = (Path(file.filename or "upload.png").suffix) or ".png"
+    if not PATIENT_ID_RE.fullmatch(patient_id or ""):
+        raise HTTPException(status_code=400, detail="patient_id must contain only letters, numbers, _ or - (max 64 characters)")
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="Only image uploads are accepted")
+    contents = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image must be 10 MB or smaller")
+    if cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR) is None:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a readable image")
+    ext = ".png"
     save_path = UPLOADS_DIR / f"{uuid.uuid4().hex}{ext}"
     with open(save_path, "wb") as f:
-        f.write(await file.read())
+        f.write(contents)
 
     # warm the model on first call (page-one latency hiding)
     if PIPELINE_AVAILABLE:
@@ -302,7 +315,10 @@ async def screen(
         except Exception:
             pass
 
-    result = run_pipeline(str(save_path), patient_id or "DEMO")
+    try:
+        result = run_pipeline(str(save_path), patient_id)
+    finally:
+        save_path.unlink(missing_ok=True)
 
     conn = get_db()
     conn.execute(

@@ -260,12 +260,12 @@ function Footer() {
             </li>
             <li>
               <a
-                href="https://github.com"
+                href="https://github.com/24f2006874/neural-minds"
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 transition-colors hover:text-[#22D3EE]"
               >
-                <Github className="h-3.5 w-3.5" /> github.com/team-neural-minds
+                <Github className="h-3.5 w-3.5" /> github.com/24f2006874/neural-minds
               </a>
             </li>
             <li>

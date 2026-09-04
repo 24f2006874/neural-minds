@@ -134,16 +134,9 @@ def predict_onnx(img_bgr):
     session = get_onnx_session()
     if session is None:
         return None
-    # Keep inference independent of train_model.py (and PyTorch). Railway uses
-    # the lightweight ONNX runtime image, not the training environment.
-    input_size = 256
-    h, w = img_bgr.shape[:2]
-    scale = input_size / max(h, w)
-    resized_small = cv2.resize(img_bgr, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
-    resized = np.zeros((input_size, input_size, 3), dtype=np.uint8)
-    top = (input_size - resized_small.shape[0]) // 2
-    left = (input_size - resized_small.shape[1]) // 2
-    resized[top:top + resized_small.shape[0], left:left + resized_small.shape[1]] = resized_small
+    # Match the APTOS ResNet50 preprocessing exactly: remove black borders,
+    # resize the remaining fundus to 256x256, then normalize in RGB space.
+    resized = cv2.resize(crop_fundus(img_bgr), (256, 256), interpolation=cv2.INTER_AREA)
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
     image = rgb.astype(np.float32) / 255.0
     image = (image - np.array([0.485, 0.456, 0.406], dtype=np.float32)) / np.array(
