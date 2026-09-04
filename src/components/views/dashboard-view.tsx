@@ -2076,7 +2076,7 @@ export default function DashboardView() {
                   <Button
                     variant="outline"
                     className="min-h-11 border-white/15 hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
-                    onClick={() => downloadReportPdf(detailResult)}
+                    onClick={() => void downloadReportPdf(detailResult)}
                   >
                     <Download className="h-4 w-4" aria-hidden="true" />
                     {t("dash.pdf")}

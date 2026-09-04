@@ -4,11 +4,20 @@ import { jsPDF } from "jspdf";
 import type { ScreeningResult, TrustLevel } from "@/lib/drishti";
 import { ICDR_CLASSES, VALIDATED_METRICS } from "@/lib/drishti";
 
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Unable to load ${src}`));
+    image.src = src;
+  });
+}
+
 /**
  * Clinical report PDF — matches the on-screen Clinical Report card.
  * Trust colors follow the DRISHTI language: green HIGH / amber MODERATE / red LOW.
  */
-export function downloadReportPdf(result: ScreeningResult) {
+export async function downloadReportPdf(result: ScreeningResult) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const W = 210;
   const M = 18;
@@ -18,10 +27,16 @@ export function downloadReportPdf(result: ScreeningResult) {
   // Header band
   doc.setFillColor(6, 11, 20);
   doc.rect(0, 0, W, 26, "F");
+  try {
+    const logo = await loadImage("/icons/icon-192.png");
+    doc.addImage(logo, "PNG", M, 4, 13, 13);
+  } catch {
+    // Continue without the logo if the asset is unavailable offline.
+  }
   doc.setTextColor(34, 211, 238);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
-  doc.text("DRISHTI", M, 12);
+  doc.text("DRISHTI", M + 16, 12);
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(160, 190, 215);

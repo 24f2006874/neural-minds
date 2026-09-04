@@ -1126,7 +1126,7 @@ export default function ScreeningView() {
                 {/* actions */}
                 <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
                   <Button
-                    onClick={() => downloadReportPdf(result)}
+                    onClick={() => void downloadReportPdf(result)}
                     className="btn-glow-cyan h-11 flex-1 bg-[#22D3EE] font-display font-semibold text-[#04121c] hover:bg-[#22D3EE]/90"
                   >
                     <FileDown className="h-4 w-4" aria-hidden />
