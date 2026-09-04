@@ -13,6 +13,12 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+function reportImageUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  const backend = process.env.NEXT_PUBLIC_DRISHTI_BACKEND_URL?.replace(/\/$/, "");
+  return backend ? `${backend}${path.startsWith("/") ? path : `/${path}`}` : path;
+}
+
 /**
  * Clinical report PDF — matches the on-screen Clinical Report card.
  * Trust colors follow the DRISHTI language: green HIGH / amber MODERATE / red LOW.
@@ -45,6 +51,21 @@ export async function downloadReportPdf(result: ScreeningResult) {
   doc.text(new Date(result.created_at).toLocaleString(), W - M, 18.5, { align: "right" });
 
   let y = 38;
+
+  // Include the backend's four-panel clinical image before the text report.
+  // It is available for real Railway screenings; simulated/local responses
+  // simply continue with the regular text report.
+  if (result.report_url?.endsWith(".png")) {
+    try {
+      const reportImage = await loadImage(reportImageUrl(result.report_url));
+      const maxW = W - 2 * M;
+      const imageH = Math.min(78, maxW * (reportImage.height / reportImage.width));
+      doc.addImage(reportImage, "PNG", M, y, maxW, imageH);
+      y += imageH + 8;
+    } catch {
+      // The report image may have expired from Railway's temporary storage.
+    }
+  }
 
   // Verdict box
   const grade =
