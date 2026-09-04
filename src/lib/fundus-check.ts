@@ -9,16 +9,14 @@
  * IMPORTANT: this is a UX guardrail, not security. It must run BEFORE any
  * /api/screen POST, while allowing natural variation in real fundus photos.
  *
- * Heuristics (geometry is hard; visual signals are scored together):
- *   1. Aspect ratio within [0.85, 1.18]      — fundus cameras are ~square
- *   2. Width AND height ≥ 256                — rejects very small thumbnails
- *   3. Center dominant color is warm         — fundus background is red/orange
- *   4. ≥55% center pixels are reddish        — skin/outdoor/portrait fail
- *   5. Luminance std-dev ≥ 18 in center      — flat screenshots fail
- *   6. Edge density ≥ 1.5% in center         — solid color / sky fails
- *   7. Variance of Laplacian ≥ 30            — proxy for blur, let blurry
- *                                              through to the real quality
- *                                              gate rather than double-reject
+ * Signals are split into two tiers:
+ *   - HARD (any failure → reject): aspect ratio, resolution, decode
+ *   - SOFT (allow up to 1 failure): warm center, reddish coverage,
+ *     luminance variance, edge density
+ *
+ * Blur (Laplacian variance) is recorded but never causes rejection — the
+ * existing quality gate owns blur. It is excluded from the score so the
+ * returned `score` is the actual pass rate of the four soft signals.
  *
  * Thresholds are deliberately strict and live as constants at the top so
  * they can be tuned without re-reading the heuristic code.
@@ -26,53 +24,65 @@
 
 const ANALYSIS_SIZE = 128;
 const CENTER_CROP_FRAC = 0.5;
+const SOFT_MAX_FAILURES = 1;
 
 const THRESHOLDS = {
   aspectMin: 0.85,
   aspectMax: 1.18,
   minDimension: 256,
   centerWarmRMinusB: 20,
-  centerWarmR: 70,
+  centerWarmR: 60,
   reddishCoverage: 0.55,
   reddishDR: 15,
   reddishDB: 25,
   reddishMinR: 60,
   luminanceStdDev: 18,
   edgeDensity: 0.015,
+  edgeMagnitude: 30,
   laplacianVar: 30,
 } as const;
 
 export type FundusCheckResult = {
   accepted: boolean;
-  /** human-readable rejection reasons (English, technical) — shown in UI */
+  /** hard reasons to reject — only populated when accepted=false */
   reasons: string[];
-  /** 0..1 fraction of signals that passed — debug aid, not displayed by default */
+  /** informational warnings (e.g. "looks blurry") that do not block acceptance */
+  notes: string[];
+  /** 0..1 fraction of soft signals that passed — debug aid, not displayed by default */
   score: number;
 };
 
 export async function looksLikeFundus(file: File): Promise<FundusCheckResult> {
-  const reasons: string[] = [];
-  let passed = 0;
-  const total = 7;
+  const hardReasons: string[] = [];
+  const softReasons: string[] = [];
+  let softPassed = 0;
+  const softTotal = 4;
 
-  const bitmap = await decodeBitmap(file);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await decodeBitmap(file);
+  } catch {
+    return {
+      accepted: false,
+      reasons: ["Couldn't decode the image — please upload a valid PNG/JPG fundus photograph."],
+      notes: [],
+      score: 0,
+    };
+  }
+
   const { width, height } = bitmap;
 
   if (width < THRESHOLDS.minDimension || height < THRESHOLDS.minDimension) {
-    reasons.push(
+    hardReasons.push(
       `Resolution too small (${width}×${height}) — fundus cameras produce at least ${THRESHOLDS.minDimension}px on each side.`,
     );
-  } else {
-    passed += 1;
   }
 
   const aspect = width / height;
   if (aspect < THRESHOLDS.aspectMin || aspect > THRESHOLDS.aspectMax) {
-    reasons.push(
+    hardReasons.push(
       `Aspect ratio ${aspect.toFixed(2)} is not square — fundus photographs are roughly 1:1 (±15%).`,
     );
-  } else {
-    passed += 1;
   }
 
   const { pixels, w: aw, h: ah } = downscaleToCenter(bitmap, ANALYSIS_SIZE, CENTER_CROP_FRAC);
@@ -80,62 +90,58 @@ export async function looksLikeFundus(file: File): Promise<FundusCheckResult> {
   const meanR = meanChannel(pixels, aw, ah, 0);
   const meanB = meanChannel(pixels, aw, ah, 2);
   const warmCenter = meanR - meanB >= THRESHOLDS.centerWarmRMinusB && meanR >= THRESHOLDS.centerWarmR;
-  if (!warmCenter) {
-    reasons.push(
+  if (warmCenter) {
+    softPassed += 1;
+  } else {
+    softReasons.push(
       `Center isn't warm (R−B ${(meanR - meanB).toFixed(0)}, R ${meanR.toFixed(0)}) — fundus backgrounds are red/orange.`,
     );
-  } else {
-    passed += 1;
   }
 
   const reddishFrac = reddishCoverage(pixels, aw, ah);
-  if (reddishFrac < THRESHOLDS.reddishCoverage) {
-    reasons.push(
+  if (reddishFrac >= THRESHOLDS.reddishCoverage) {
+    softPassed += 1;
+  } else {
+    softReasons.push(
       `Only ${(reddishFrac * 100).toFixed(0)}% of the center is reddish — fundus backgrounds are dominated by red/orange tones.`,
     );
-  } else {
-    passed += 1;
   }
 
   const lumStd = luminanceStdDev(pixels, aw, ah);
-  if (lumStd < THRESHOLDS.luminanceStdDev) {
-    reasons.push(
+  if (lumStd >= THRESHOLDS.luminanceStdDev) {
+    softPassed += 1;
+  } else {
+    softReasons.push(
       `Center is too flat (luminance σ ${lumStd.toFixed(1)}) — screenshots and solid colors lack retinal structure.`,
     );
-  } else {
-    passed += 1;
   }
 
   const edgeRatio = edgeDensity(pixels, aw, ah);
-  if (edgeRatio < THRESHOLDS.edgeDensity) {
-    reasons.push(
+  if (edgeRatio >= THRESHOLDS.edgeDensity) {
+    softPassed += 1;
+  } else {
+    softReasons.push(
       `Edge density too low (${(edgeRatio * 100).toFixed(2)}%) — no visible vessel-like structure.`,
     );
-  } else {
-    passed += 1;
   }
 
+  // Blur is recorded but intentionally not a rejection signal — the existing
+  // quality gate owns blur, and double-rejecting would be user-hostile.
   const lapVar = laplacianVariance(pixels, aw, ah);
-  if (lapVar < THRESHOLDS.laplacianVar) {
-    reasons.push(
-      `Image is very blurry (Laplacian variance ${lapVar.toFixed(1)}) — recapture with a steadier hand.`,
-    );
-    // Per plan: blurry photos are intentionally NOT rejected here — let the
-    // existing quality gate own that decision. Mark as passed for scoring.
-    passed += 1;
-  } else {
-    passed += 1;
-  }
+  const blurNote =
+    lapVar < THRESHOLDS.laplacianVar
+      ? `Image looks blurry (Laplacian variance ${lapVar.toFixed(1)}) — the quality gate will re-check it.`
+      : null;
 
   bitmap.close?.();
 
-  // Real fundus photos vary in lighting, crop and camera borders. Require the
-  // hard geometry checks plus at least three of the four color/texture signals instead
-  // of rejecting a valid retina image because one color/texture signal differs.
-  const geometryPassed = width >= THRESHOLDS.minDimension && aspect >= THRESHOLDS.aspectMin && aspect <= THRESHOLDS.aspectMax;
-  const accepted = geometryPassed && passed >= 5;
-  const score = passed / total;
-  return { accepted, reasons: dedupe(reasons), score };
+  const hardOk = hardReasons.length === 0;
+  const softFailures = softTotal - softPassed;
+  const accepted = hardOk && softFailures <= SOFT_MAX_FAILURES;
+  const reasons = accepted ? [] : dedupe([...hardReasons, ...softReasons]);
+  const notes = blurNote ? [blurNote] : [];
+  const score = softPassed / softTotal;
+  return { accepted, reasons, notes, score };
 }
 
 async function decodeBitmap(file: File): Promise<ImageBitmap> {
@@ -249,7 +255,7 @@ function edgeDensity(pixels: Uint8ClampedArray, w: number, h: number): number {
         2 * lum[i + w + 1] +
         lum[i + w + 2];
       const mag = Math.abs(gx) + Math.abs(gy);
-      if (mag > 80) edges += 1;
+      if (mag > THRESHOLDS.edgeMagnitude) edges += 1;
     }
   }
   return total > 0 ? edges / total : 0;

@@ -350,8 +350,9 @@ export default function ScreeningView() {
         toast.error(t("screen.notFundus.title"));
       }
     } catch {
-      // Decode failure (corrupt file, unsupported codec) — treat as wrong image
-      // rather than letting it fall through to the pipeline.
+      // Defensive: looksLikeFundus currently returns a rejection result rather
+      // than throwing, but keep this branch in case a future implementation
+      // surfaces decode errors as exceptions.
       setWrongImageReasons(["Couldn't decode the image — please upload a valid PNG/JPG fundus photograph."]);
       setPhase("wrong_image");
       toast.error(t("screen.notFundus.title"));
@@ -398,16 +399,12 @@ export default function ScreeningView() {
       try {
         const check = await looksLikeFundus(f);
         if (!check.accepted) {
-          if (previewUrl) URL.revokeObjectURL(previewUrl);
-          setPreviewUrl(URL.createObjectURL(f));
           setWrongImageReasons(check.reasons);
           setPhase("wrong_image");
           toast.error(t("screen.notFundus.title"));
           return;
         }
       } catch {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        setPreviewUrl(URL.createObjectURL(f));
         setWrongImageReasons(["Couldn't decode the image — please upload a valid PNG/JPG fundus photograph."]);
         setPhase("wrong_image");
         toast.error(t("screen.notFundus.title"));
