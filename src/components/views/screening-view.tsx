@@ -33,10 +33,11 @@ import {
   type ScreeningResult,
 } from "@/lib/drishti";
 import { downloadReportPdf } from "@/lib/report-pdf";
+import { looksLikeFundus } from "@/lib/fundus-check";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-type Phase = "idle" | "running" | "done" | "rejected" | "error";
+type Phase = "idle" | "running" | "done" | "rejected" | "wrong_image" | "error";
 
 interface RecentRun {
   patient_id: string;
@@ -270,6 +271,7 @@ export default function ScreeningView() {
   const [result, setResult] = useState<ScreeningResult | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
+  const [wrongImageReasons, setWrongImageReasons] = useState<string[]>([]);
   const [runNonce, setRunNonce] = useState(0);
   const [recent, setRecent] = useState<RecentRun[] | null>(null);
   // "Send to review queue" — persisted routing (PATCH → server-side ROUTED audit event)
@@ -321,22 +323,39 @@ export default function ScreeningView() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(null);
     setPreviewUrl(null);
+    setWrongImageReasons([]);
   };
 
-  const acceptFile = (f: File | null | undefined) => {
+  const acceptFile = async (f: File | null | undefined) => {
     if (!f || phase === "running") return;
     if (!f.type.startsWith("image/")) {
       toast.error("That's not an image — drop a PNG/JPG fundus photograph");
       return;
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+    const url = URL.createObjectURL(f);
     setFile(f);
-    setPreviewUrl(URL.createObjectURL(f));
+    setPreviewUrl(url);
     setResult(null);
     setErrorMsg("");
     setElapsed(0);
+    setWrongImageReasons([]);
     setPhase("idle");
     setQueuedFor(null);
+    try {
+      const check = await looksLikeFundus(f);
+      if (!check.accepted) {
+        setWrongImageReasons(check.reasons);
+        setPhase("wrong_image");
+        toast.error(t("screen.notFundus.title"));
+      }
+    } catch {
+      // Decode failure (corrupt file, unsupported codec) — treat as wrong image
+      // rather than letting it fall through to the pipeline.
+      setWrongImageReasons(["Couldn't decode the image — please upload a valid PNG/JPG fundus photograph."]);
+      setPhase("wrong_image");
+      toast.error(t("screen.notFundus.title"));
+    }
   };
 
   /** Play the stage timeline using the backend's own stage timings (50 ms clock). */
@@ -375,6 +394,26 @@ export default function ScreeningView() {
       return;
     }
     if (phase === "running") return;
+    if (f) {
+      try {
+        const check = await looksLikeFundus(f);
+        if (!check.accepted) {
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          setPreviewUrl(URL.createObjectURL(f));
+          setWrongImageReasons(check.reasons);
+          setPhase("wrong_image");
+          toast.error(t("screen.notFundus.title"));
+          return;
+        }
+      } catch {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(URL.createObjectURL(f));
+        setWrongImageReasons(["Couldn't decode the image — please upload a valid PNG/JPG fundus photograph."]);
+        setPhase("wrong_image");
+        toast.error(t("screen.notFundus.title"));
+        return;
+      }
+    }
     lastAttemptRef.current = { pid: id, file: f };
     stopClock();
     setPhase("running");
@@ -438,6 +477,7 @@ export default function ScreeningView() {
     setElapsed(0);
     setAwaiting(false);
     setErrorMsg("");
+    setWrongImageReasons([]);
     setPhase("idle");
   };
 
@@ -1160,6 +1200,77 @@ export default function ScreeningView() {
                 <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
                   <Button
                     onClick={backToIdle}
+                    className="btn-glow-cyan h-11 flex-1 bg-[#22D3EE] font-display font-semibold text-[#04121c] hover:bg-[#22D3EE]/90"
+                  >
+                    <Camera className="h-4 w-4" aria-hidden />
+                    Try again
+                  </Button>
+                  <Button
+                    onClick={resetAll}
+                    variant="outline"
+                    className="h-11 border-white/15 font-display font-semibold hover:bg-white/5"
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden />
+                    {t("screen.new")}
+                  </Button>
+                </div>
+              </GlassCard>
+            )}
+
+            {/* wrong image — client-side fundus sanity check rejected the upload */}
+            {phase === "wrong_image" && (
+              <GlassCard className="border-[#F87171]/30">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#F87171]/40 bg-[#F87171]/10"
+                      aria-hidden
+                    >
+                      <TriangleAlert className="h-5 w-5 text-[#F87171]" />
+                    </div>
+                    <div>
+                      <p className="font-display text-lg font-bold text-[#F87171]">{t("screen.notFundus.title")}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{t("screen.notFundus.hint")}</p>
+                    </div>
+                  </div>
+                  <StatusChip status="REJECTED" />
+                </div>
+
+                <div className="mt-5 grid items-center gap-5 rounded-xl border border-white/10 bg-white/3 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
+                  <div className="relative mx-auto aspect-square w-full max-w-[180px] overflow-hidden rounded-lg border border-white/10 bg-black">
+                    {previewUrl && (
+                      <>
+                        <img
+                          src={previewUrl}
+                          alt="Uploaded photograph rejected by the fundus sanity check"
+                          className="h-full w-full object-cover blur-[2px] saturate-[0.6]"
+                        />
+                        <RejectedStamp />
+                      </>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    <p className="font-medium text-foreground">Why it was rejected</p>
+                    {wrongImageReasons.length > 0 ? (
+                      <ul className="mt-2 space-y-1 text-xs leading-relaxed">
+                        {wrongImageReasons.map((r, i) => (
+                          <li key={i}>· {r}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-xs leading-relaxed">
+                        The image doesn't match the fundus photograph profile.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
+                  <Button
+                    onClick={() => {
+                      backToIdle();
+                      fileInputRef.current?.click();
+                    }}
                     className="btn-glow-cyan h-11 flex-1 bg-[#22D3EE] font-display font-semibold text-[#04121c] hover:bg-[#22D3EE]/90"
                   >
                     <Camera className="h-4 w-4" aria-hidden />
