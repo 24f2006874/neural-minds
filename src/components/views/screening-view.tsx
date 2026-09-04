@@ -27,6 +27,8 @@ import { Input } from "@/components/ui/input";
 import {
   ICDR_CLASSES,
   PROB_LABELS,
+  DEMO_CASES,
+  TRUST_THRESHOLDS,
   type EvidenceResult,
   type ScreeningResult,
 } from "@/lib/drishti";
@@ -468,6 +470,14 @@ export default function ScreeningView() {
     setErrorMsg("");
     setWrongImageReasons([]);
     setPhase("idle");
+  };
+
+  // Used only for reopening a previously recorded case from the register.
+  const runPreset = (id: string) => {
+    if (phase === "running") return;
+    setPatientId(id);
+    clearFile();
+    void startRun(id, null);
   };
 
   const resetAll = () => {

@@ -57,7 +57,7 @@ interface HeadlineMetrics {
   sensitivity: number;
   specificity: number;
   qwk: number;
-  auc: number;
+  auc: number | null;
   dataset: string;
   runs: ReadonlyArray<{ run: string; sensitivity: number; specificity: number; seed: number }>;
 }
